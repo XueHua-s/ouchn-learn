@@ -1,0 +1,42 @@
+{
+  "name": "Matrix插件模板",
+  "version": "0.0.1",
+  "manifest_version": 3,
+  "description": "一个基本的插件模板",
+  "icons": {
+    "16": "/assets/dev.png",
+    "48": "/assets/dev.png",
+    "96": "/assets/dev.png",
+    "128": "/assets/dev.png"
+  },
+  "action": {
+    "default_title": "Matrix",
+    "default_popup": "/popup/index.html"
+  },
+  "permissions": [
+    "tabs",
+    "contextMenus",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "*://*/*"
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
+  "background": {
+    "service_worker": "/background/index.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["/contentScript/index.js"],
+      "run_at": "document_end"
+    }
+  ],
+  "web_accessible_resources": [{
+    "resources": ["contentScript/style.css"],
+    "matches": ["<all_urls>"]
+  }]
+}
