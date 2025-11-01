@@ -1,3 +1,4 @@
+Puppeteer MCP
 # vite-crx-template
 
 > fork from: [vite-crx-template](https://github.com/Tinsson/vite-crx-template)
