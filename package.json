@@ -1,8 +1,8 @@
 {
   "name": "crx-starter",
+  "type": "module",
   "version": "0.0.1",
   "description": "Simple Chrome Extension Vite Starter starter",
-  "type": "module",
   "author": "Wyatex",
   "scripts": {
     "dev": "cross-env CRX_ENV=development run-p dev:*",
