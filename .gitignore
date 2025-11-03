@@ -1,6 +1,8 @@
 node_modules
 dist
+*.user.js
 .DS_Store
 local
 extension
 .idea
+.vscode

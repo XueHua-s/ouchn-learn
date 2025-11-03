@@ -1,42 +1,109 @@
-Puppeteer MCP
+# 国家开放大学视频一键挂机脚本+资源下载
 
-# vite-crx-template
+国家开放大学视频一键挂机脚本，新增课件/视频一键下载功能。
 
-> fork from: [vite-crx-template](https://github.com/Tinsson/vite-crx-template)
+## 功能特性
 
-note: 因为contentScript里的内容使用shadow-dom注入到body，naive-ui的样式可能不正常，可以用回element-plus，也可以不用shadow-dom，看注释进行修改，要注意不用shadow-dom可能导致和原有页面样式发生冲突。
+- 🎬 **视频挂机**: 自动挂机学习视频，节省时间
+- 📥 **资源下载**: 一键扫描并下载页面上的视频、文档、音频等资源
+- 👀 **自动查看**: 自动查看所有未完成的页面
+- 🚀 **批量处理**: 支持批量挂机和批量下载
 
-## 简介
+## 安装
 
-简单好用的chrome插件开发模板
-
-## Features
-
-- 🚀 支持V3版本的manifest
-- 🖥 支持background,contentScript,popup的热更新
-- 📦 vite + vue3 + elementplus
+1. 安装油猴插件（Tampermonkey）
+2. 点击 [index.user.js](index.user.js) 安装脚本
+3. 访问国家开放大学课程页面即可使用
 
 ## 开发
 
-拉取代码后
+### 技术栈
 
-```bash
-pnpm i
-pnpm dev
+- TypeScript
+- tsup (构建工具)
+- ESLint + Prettier (代码质量)
+- Husky + lint-staged (Git Hooks)
+
+### 项目结构
+
+```
+src/
+├── constants/        # 常量定义
+├── modules/          # 功能模块
+│   ├── styles.ts          # 样式注入
+│   ├── panel.ts           # 下载面板
+│   ├── resource-download.ts  # 资源下载
+│   ├── auto-view.ts       # 自动查看页面
+│   ├── auto-hang.ts       # 自动挂机
+│   └── legacy-hang.ts     # 原有挂机功能
+├── types/            # 类型定义
+├── utils/            # 工具函数
+│   ├── helper.ts          # 通用工具
+│   ├── storage.ts         # 存储管理
+│   └── dom.ts             # DOM 操作
+└── index.ts          # 入口文件
 ```
 
-开发环境，调试用的结果代码放在根目录 `local` 文件夹下
-
-## 发布打包
-
-拉取代码后
+### 开发命令
 
 ```bash
-pnpm build
+# 安装依赖
+pnpm install
+
+# 开发模式（监听文件变化）
+pnpm run dev
+
+# 构建
+pnpm run build
+
+# 类型检查
+pnpm run typecheck
+
+# 代码检查
+pnpm run lint
+
+# 代码检查并自动修复
+pnpm run lint:fix
+
+# 代码格式化
+pnpm run format
 ```
 
-生成环境，代码放在根目录 `extension` 文件夹下
+### Git 提交规范
 
-## 入群交流
+项目配置了 Git Hooks，在提交代码时会自动执行：
 
-![图片描述](https://raw.githubusercontent.com/MatrixCross/React-Crx-Starter/master/src/assets/20240703225505.jpg)
+1. Prettier 格式化代码
+2. ESLint 检查并修复
+3. TypeScript 类型检查
+
+确保所有检查通过后才能提交代码。
+
+## 使用说明
+
+### 资源下载
+
+1. 点击 "🔍 扫描当前页面资源" 扫描页面上的可下载资源
+2. 可以单独下载某个资源，或点击 "📦 下载全部资源" 批量下载
+
+### 自动查看页面
+
+点击 "👀 一键查看所有页面" 自动访问所有未完成的页面，脚本会自动：
+- 扫描未完成的"查看页面"任务
+- 依次访问每个页面
+- 等待页面加载完成后返回继续下一个
+
+### 自动挂机
+
+1. 设置挂机间隔时间（默认30秒）
+2. 点击 "🎬 一键全部挂机" 自动挂机所有视频
+
+## 注意事项
+
+- 本脚本仅供学习交流使用
+- 请合理使用挂机功能，不要影响正常学习
+- 建议在网络状况良好时使用
+
+## License
+
+MIT
