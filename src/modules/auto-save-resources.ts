@@ -1,27 +1,4 @@
 /**
- * 动态加载html2pdf库
- */
-async function loadHtml2Pdf(): Promise<any> {
-  if ((window as any).html2pdf) {
-    return (window as any).html2pdf;
-  }
-
-  return new Promise((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
-    script.onload = () => {
-      console.log('[保存资源] html2pdf 库加载成功');
-      resolve((window as any).html2pdf);
-    };
-    script.onerror = () => {
-      console.error('[保存资源] html2pdf 库加载失败');
-      reject(new Error('Failed to load html2pdf library'));
-    };
-    document.head.appendChild(script);
-  });
-}
-
-/**
  * 等待DOM稳定
  */
 async function waitForDOMStable(timeout = 2000): Promise<void> {
@@ -303,26 +280,53 @@ async function saveDocumentResource(title: string, statusCallback?: (message: st
   console.log(`[保存资源] 生成PDF: ${fileName}`);
 
   try {
-    // 加载html2pdf库
-    const html2pdf = await loadHtml2Pdf();
+    // 检查预加载的库是否可用
+    const jsPDF = (window as any).jspdf?.jsPDF;
+    const html2canvas = (window as any).html2canvas;
 
-    // 配置PDF选项
-    const opt = {
-      margin: 10,
-      filename: `${fileName}.pdf`,
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true },
-      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-    };
+    if (!jsPDF || !html2canvas) {
+      throw new Error('PDF生成库未加载，请刷新页面重试');
+    }
 
-    // 生成并下载PDF
-    await html2pdf().set(opt).from(pageDetail).save();
+    statusCallback?.(`正在生成PDF文件: ${fileName}`);
+
+    // 使用 html2canvas 将 HTML 转为图片
+    const canvas = await html2canvas(pageDetail as HTMLElement, {
+      scale: 2,
+      useCORS: true,
+      logging: false,
+    });
+
+    // 获取图片数据
+    const imgData = canvas.toDataURL('image/jpeg', 0.98);
+    const imgWidth = 210; // A4 宽度（mm）
+    const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+    // 创建 PDF
+    const pdf = new jsPDF('p', 'mm', 'a4');
+    let heightLeft = imgHeight;
+    let position = 0;
+
+    // 添加第一页
+    pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
+    heightLeft -= 297; // A4 高度
+
+    // 如果内容超过一页，添加更多页
+    while (heightLeft > 0) {
+      position = heightLeft - imgHeight;
+      pdf.addPage();
+      pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
+      heightLeft -= 297;
+    }
+
+    // 保存 PDF
+    pdf.save(`${fileName}.pdf`);
 
     statusCallback?.(`✅ 已保存文档: ${fileName}`);
     return true;
   } catch (error) {
     console.error(`[保存资源] 生成PDF失败: ${fileName}`, error);
-    statusCallback?.(`❌ 生成PDF失败: ${fileName}`);
+    statusCallback?.(`❌ 生成PDF失败: ${fileName} - ${error}`);
     return false;
   }
 }

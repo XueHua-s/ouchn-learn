@@ -20,6 +20,8 @@ export default defineConfig({
 // @match        https://lms.ouchn.cn/course/**
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=ouchn.cn
 // @require      https://cdn.bootcss.com/jquery/3.4.1/jquery.min.js
+// @require      https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js
+// @require      https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js
 // @grant        GM_download
 // @grant        GM_xmlhttpRequest
 // @connect      *
