@@ -1,6 +1,4 @@
 import { defineConfig } from 'tsup';
-import fs from 'fs';
-import path from 'path';
 
 export default defineConfig({
   entry: ['src/index.ts'],
@@ -26,15 +24,5 @@ export default defineConfig({
 // @grant        GM_xmlhttpRequest
 // @connect      *
 // ==/UserScript==`,
-  },
-  onSuccess: async () => {
-    // 将 index.js 复制到根目录
-    const distFile = path.join(process.cwd(), 'dist', 'index.global.js');
-    const rootFile = path.join(process.cwd(), 'index.user.js');
-
-    if (fs.existsSync(distFile)) {
-      fs.copyFileSync(distFile, rootFile);
-      console.log('✓ 已生成 index.user.js');
-    }
   },
 });

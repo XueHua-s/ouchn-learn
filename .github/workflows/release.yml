@@ -120,8 +120,6 @@ jobs:
           body_path: CHANGELOG.md
           draft: false
           prerelease: false
-          files: |
-            dist/index.global.js
-            index.user.js
+          files: dist/index.global.js
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
