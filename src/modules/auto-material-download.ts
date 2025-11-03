@@ -140,17 +140,12 @@ async function downloadFile(link: DownloadLink, delay: number): Promise<void> {
 }
 
 /**
- * 处理单个参考资料活动
+ * 收集单个参考资料活动的文件信息
  */
-async function processMaterialActivity(
-  activity: MaterialActivity,
-  fileDelay: number,
-  updateStatus?: (msg: string, type: string) => void,
-): Promise<number> {
+async function collectMaterialFiles(activity: MaterialActivity): Promise<DownloadLink[]> {
   const { title } = activity;
 
-  updateStatus?.(`正在处理: ${title}`, 'info');
-  console.log(`[批量下载] ========== 开始处理: ${title} ==========`);
+  console.log(`[批量下载] ========== 开始收集: ${title} ==========`);
 
   try {
     // 展开并获取下载链接
@@ -158,25 +153,14 @@ async function processMaterialActivity(
 
     if (downloadLinks.length === 0) {
       console.log(`[批量下载] ${title} 没有可下载的文件`);
-      updateStatus?.(`${title}: 没有可下载的文件`, 'warning');
-      return 0;
+    } else {
+      console.log(`[批量下载] ${title} 找到 ${downloadLinks.length} 个文件`);
     }
 
-    // 下载所有文件
-    for (let i = 0; i < downloadLinks.length; i++) {
-      const link = downloadLinks[i];
-      updateStatus?.(`${title}: 下载 ${i + 1}/${downloadLinks.length} - ${link.fileName}`, 'info');
-      await downloadFile(link, fileDelay);
-    }
-
-    console.log(`[批量下载] ${title} 完成，共下载 ${downloadLinks.length} 个文件`);
-    updateStatus?.(`${title}: 完成 (${downloadLinks.length} 个文件)`, 'success');
-
-    return downloadLinks.length;
+    return downloadLinks;
   } catch (error) {
-    console.error(`[批量下载] 处理 ${title} 时出错:`, error);
-    updateStatus?.(`${title}: 处理失败`, 'error');
-    return 0;
+    console.error(`[批量下载] 收集 ${title} 文件时出错:`, error);
+    return [];
   }
 }
 
@@ -217,27 +201,41 @@ export async function startAutoMaterialDownload(): Promise<void> {
       return;
     }
 
-    updateStatus(`找到 ${activities.length} 个参考资料活动，开始处理...`, 'info');
+    updateStatus(`找到 ${activities.length} 个参考资料活动，正在收集文件信息...`, 'info');
 
-    let totalFiles = 0;
-    let processedCount = 0;
+    // 第一阶段：收集所有文件信息
+    const allFiles: DownloadLink[] = [];
+    for (let i = 0; i < activities.length; i++) {
+      const activity = activities[i];
+      updateStatus(`收集文件信息 (${i + 1}/${activities.length}): ${activity.title}`, 'info');
 
-    // 逐个处理每个参考资料活动
-    for (const activity of activities) {
-      processedCount++;
-      updateStatus(`处理中 (${processedCount}/${activities.length}): ${activity.title}`, 'info');
-
-      const fileCount = await processMaterialActivity(activity, fileDelay, updateStatus);
-      totalFiles += fileCount;
+      const files = await collectMaterialFiles(activity);
+      allFiles.push(...files);
 
       // 在活动之间稍作等待
-      if (processedCount < activities.length) {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+      if (i < activities.length - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
       }
     }
 
-    updateStatus(`✅ 批量下载完成！处理 ${activities.length} 个活动，共下载 ${totalFiles} 个文件`, 'success');
-    console.log(`[批量下载] ========== 全部完成 ==========`);
+    if (allFiles.length === 0) {
+      updateStatus('没有找到可下载的文件', 'warning');
+      btn.prop('disabled', false);
+      return;
+    }
+
+    console.log(`[批量下载] 共找到 ${allFiles.length} 个文件，开始下载...`);
+    updateStatus(`准备下载 ${allFiles.length} 个文件...`, 'info');
+
+    // 第二阶段：逐个下载所有文件
+    for (let i = 0; i < allFiles.length; i++) {
+      const file = allFiles[i];
+      updateStatus(`下载中 ${i + 1}/${allFiles.length}: ${file.fileName}`, 'info');
+      await downloadFile(file, fileDelay);
+    }
+
+    updateStatus(`✅ 批量下载完成！共下载 ${allFiles.length} 个文件`, 'success');
+    console.log(`[批量下载] ========== 全部完成，共下载 ${allFiles.length} 个文件 ==========`);
   } catch (error) {
     console.error('[批量下载] 执行失败:', error);
     updateStatus(`❌ 执行失败: ${error}`, 'error');
