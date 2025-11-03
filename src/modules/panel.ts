@@ -2,12 +2,28 @@ import { makeDraggable } from '@/utils/helper';
 import { startAutoViewPages } from './auto-view';
 import { startAutoHangAll } from './auto-hang';
 import { startAutoMaterialDownload } from './auto-material-download';
+import { startSaveAllResources } from './auto-save-resources';
 import { DEFAULT_HANG_INTERVAL } from '@/constants';
+
+/**
+ * 检查当前URL是否为全屏学习活动页面
+ */
+function isFullScreenLearningActivity(): boolean {
+  const url = window.location.href;
+  return url.includes('/learning-activity/full-screen#/');
+}
 
 /**
  * 创建下载面板
  */
 export function createDownloadPanel(): void {
+  // 如果是全屏学习活动页面，显示简化版面板
+  if (isFullScreenLearningActivity()) {
+    console.log('[面板] 检测到全屏学习活动页面，显示简化版面板');
+    createFullScreenPanel();
+    return;
+  }
+
   const panel = $(`
     <div class="download-panel">
       <div class="download-header">
@@ -75,6 +91,44 @@ export function createDownloadPanel(): void {
   $('#auto-view-pages-btn').on('click', startAutoViewPages);
   $('#auto-download-materials-btn').on('click', startAutoMaterialDownload);
   $('#auto-hang-all-btn').on('click', startAutoHangAll);
+
+  // 使面板可拖动
+  makeDraggable(panel[0]);
+}
+
+/**
+ * 创建全屏学习活动页面的简化版面板
+ */
+function createFullScreenPanel(): void {
+  const panel = $(`
+    <div class="download-panel">
+      <div class="download-header">
+        <h3 class="download-title">📥 资源下载</h3>
+        <button class="download-toggle">−</button>
+      </div>
+      <div class="download-body">
+        <button class="download-btn download-btn-primary" id="save-all-resources-btn">
+          💾 保存所有学习资源
+        </button>
+
+        <div class="download-status download-status-info" id="save-all-status" style="display:none;">
+          准备开始...
+        </div>
+      </div>
+    </div>
+  `);
+
+  $('body').append(panel);
+
+  // 绑定折叠事件
+  panel.find('.download-toggle').on('click', function () {
+    const body = panel.find('.download-body');
+    body.toggleClass('collapsed');
+    $(this).text(body.hasClass('collapsed') ? '+' : '−');
+  });
+
+  // 绑定保存所有资源按钮事件
+  $('#save-all-resources-btn').on('click', startSaveAllResources);
 
   // 使面板可拖动
   makeDraggable(panel[0]);
