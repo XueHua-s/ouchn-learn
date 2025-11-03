@@ -279,6 +279,10 @@ async function saveDocumentResource(title: string, statusCallback?: (message: st
   statusCallback?.(`正在生成PDF: ${fileName}`);
   console.log(`[保存资源] 生成PDF: ${fileName}`);
 
+  // 第二次等待：等待文档内容完全渲染（特别是图片）
+  statusCallback?.(`正在等待文档内容加载完成...`);
+  await waitForDOMStable(1500);
+
   try {
     // 检查预加载的库是否可用
     const jsPDF = (window as any).jspdf?.jsPDF;
@@ -288,13 +292,65 @@ async function saveDocumentResource(title: string, statusCallback?: (message: st
       throw new Error('PDF生成库未加载，请刷新页面重试');
     }
 
+    statusCallback?.(`正在处理图片资源...`);
+
+    // 预处理页面中的图片，为跨域图片添加 crossorigin 属性
+    const images = pageDetail.querySelectorAll('img');
+    const imagePromises: Promise<void>[] = [];
+
+    images.forEach((img: HTMLImageElement) => {
+      if (!img.complete || !img.src) {
+        return;
+      }
+
+      // 如果图片是跨域的，需要重新加载带 crossorigin 的版本
+      const isCrossOrigin = img.src.startsWith('http') && !img.src.startsWith(window.location.origin);
+
+      if (isCrossOrigin && !img.crossOrigin) {
+        const promise = new Promise<void>((resolve) => {
+          const newImg = new Image();
+          newImg.crossOrigin = 'anonymous';
+          newImg.onload = () => {
+            img.crossOrigin = 'anonymous';
+            img.src = newImg.src;
+            resolve();
+          };
+          newImg.onerror = () => {
+            console.warn(`[保存资源] 跨域图片加载失败: ${img.src}`);
+            resolve(); // 即使失败也继续
+          };
+          newImg.src = img.src;
+        });
+        imagePromises.push(promise);
+      }
+    });
+
+    // 等待所有跨域图片处理完成
+    if (imagePromises.length > 0) {
+      await Promise.all(imagePromises);
+      // 等待一下让 DOM 更新
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+
     statusCallback?.(`正在生成PDF文件: ${fileName}`);
 
     // 使用 html2canvas 将 HTML 转为图片
     const canvas = await html2canvas(pageDetail as HTMLElement, {
       scale: 2,
       useCORS: true,
+      allowTaint: false,
       logging: false,
+      backgroundColor: '#ffffff',
+      imageTimeout: 15000,
+      onclone: (clonedDoc: Document) => {
+        // 在克隆的文档中，确保所有图片都有 crossorigin 属性
+        const clonedImages = clonedDoc.querySelectorAll('img');
+        clonedImages.forEach((img: HTMLImageElement) => {
+          if (img.src.startsWith('http') && !img.src.startsWith(window.location.origin)) {
+            img.crossOrigin = 'anonymous';
+          }
+        });
+      },
     });
 
     // 获取图片数据
