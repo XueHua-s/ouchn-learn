@@ -115,8 +115,9 @@ export async function ensureAllSectionsExpanded(): Promise<void> {
     console.log('[批量功能] 检测到章节处于收起状态，正在展开所有章节...');
     toggleButton.click();
 
-    // 等待展开动画完成
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    // 等待DOM稳定
+    console.log('[批量功能] 等待章节展开完成...');
+    await waitForDomStable();
 
     console.log('[批量功能] 所有章节已展开');
   } else if (buttonText === '全部收起') {
