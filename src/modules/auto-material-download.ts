@@ -1,4 +1,4 @@
-import { waitForPageReady } from '@/utils/dom';
+import { waitForPageReady, ensureAllSectionsExpanded } from '@/utils/dom';
 
 interface MaterialActivity {
   element: HTMLElement;
@@ -191,6 +191,10 @@ export async function startAutoMaterialDownload(): Promise<void> {
 
     // 等待页面完全加载
     await waitForPageReady(updateStatus);
+
+    // 检查并展开所有章节
+    updateStatus('检查课程章节状态...', 'info');
+    await ensureAllSectionsExpanded();
 
     // 查找所有参考资料活动
     const activities = findMaterialActivities();

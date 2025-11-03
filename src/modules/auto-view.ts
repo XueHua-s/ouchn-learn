@@ -1,6 +1,6 @@
 import type { PageElement } from '@/types';
 import { saveViewState, getViewState, clearViewState, saveReturnUrl, getReturnUrl } from '@/utils/storage';
-import { waitForPageReady } from '@/utils/dom';
+import { waitForPageReady, ensureAllSectionsExpanded } from '@/utils/dom';
 
 let isAutoViewing = false;
 
@@ -65,7 +65,7 @@ export function scanAndGetClickableElements(): PageElement[] {
 /**
  * 开始自动查看页面
  */
-export function startAutoViewPages(): void {
+export async function startAutoViewPages(): Promise<void> {
   if (isAutoViewing) {
     stopAutoViewing();
     clearViewState();
@@ -75,6 +75,11 @@ export function startAutoViewPages(): void {
 
   isAutoViewing = true;
   $('#auto-view-pages-btn').text('⏸️ 停止查看').css('background', 'linear-gradient(135deg, #ee0979 0%, #ff6a00 100%)');
+
+  // 检查并展开所有章节
+  updateAutoViewStatus('检查课程章节状态...', 'info');
+  await ensureAllSectionsExpanded();
+
   updateAutoViewStatus('正在扫描未完成的页面...', 'info');
 
   const pageElements = scanAndGetClickableElements();

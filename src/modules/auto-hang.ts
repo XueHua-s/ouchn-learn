@@ -1,5 +1,6 @@
 import type { HangInfo, ActivityReadRequest, ActivityReadResponse } from '@/types';
 import { API_BASE_URL, DEFAULT_HANG_INTERVAL } from '@/constants';
+import { ensureAllSectionsExpanded } from '@/utils/dom';
 
 let isAutoHanging = false;
 let hangQueue: HangInfo[] = [];
@@ -61,7 +62,7 @@ export function scanHangButtons(): HangInfo[] {
 /**
  * 开始一键全部挂机
  */
-export function startAutoHangAll(): void {
+export async function startAutoHangAll(): Promise<void> {
   if (isAutoHanging) {
     stopAutoHanging();
     updateAutoHangStatus('已手动停止', 'warning');
@@ -70,6 +71,11 @@ export function startAutoHangAll(): void {
 
   isAutoHanging = true;
   $('#auto-hang-all-btn').text('⏸️ 停止挂机').css('background', 'linear-gradient(135deg, #ee0979 0%, #ff6a00 100%)');
+
+  // 检查并展开所有章节
+  updateAutoHangStatus('检查课程章节状态...', 'info');
+  await ensureAllSectionsExpanded();
+
   updateAutoHangStatus('正在扫描未完成的视频...', 'info');
 
   hangQueue = scanHangButtons();

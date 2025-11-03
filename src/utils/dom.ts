@@ -89,3 +89,39 @@ export async function waitForPageReady(updateStatus?: (msg: string, type: string
   updateStatus?.('页面已稳定，准备扫描...', 'info');
   console.log('[自动查看页面] 页面完全就绪！');
 }
+
+/**
+ * 检查并展开所有课程章节
+ */
+export async function ensureAllSectionsExpanded(): Promise<void> {
+  console.log('[批量功能] 检查课程章节展开状态...');
+
+  // 查找全部展开/收起按钮
+  const toggleButton = document.querySelector<HTMLElement>(
+    'a.expand-collapse-all-button[toggle-group-manager="course-section"]',
+  );
+
+  if (!toggleButton) {
+    console.log('[批量功能] 未找到展开/收起按钮，跳过检查');
+    return;
+  }
+
+  // 检查按钮中的文字内容
+  const buttonText = toggleButton.textContent?.trim() || '';
+  console.log(`[批量功能] 当前按钮状态: ${buttonText}`);
+
+  // 如果是"全部展开"状态，说明当前是收起的，需要点击展开
+  if (buttonText === '全部展开') {
+    console.log('[批量功能] 检测到章节处于收起状态，正在展开所有章节...');
+    toggleButton.click();
+
+    // 等待展开动画完成
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    console.log('[批量功能] 所有章节已展开');
+  } else if (buttonText === '全部收起') {
+    console.log('[批量功能] 所有章节已处于展开状态');
+  } else {
+    console.log(`[批量功能] 未知的按钮状态: ${buttonText}`);
+  }
+}
