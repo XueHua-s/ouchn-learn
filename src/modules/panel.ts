@@ -1,13 +1,16 @@
 import { makeDraggable } from '@/utils/helper';
-import { scanResources, downloadAllResources } from './resource-download';
+import { updateCoursePrefix } from './resource-download';
 import { startAutoViewPages } from './auto-view';
 import { startAutoHangAll } from './auto-hang';
 import { DEFAULT_HANG_INTERVAL } from '@/constants';
+import { getCourseConfig } from '@/utils/storage';
 
 /**
  * 创建下载面板
  */
 export function createDownloadPanel(): void {
+  const config = getCourseConfig();
+
   const panel = $(`
     <div class="download-panel">
       <div class="download-header">
@@ -15,19 +18,19 @@ export function createDownloadPanel(): void {
         <button class="download-toggle">−</button>
       </div>
       <div class="download-body">
-        <div class="download-status download-status-info" id="download-status">
-          等待扫描资源...
+        <div style="margin: 10px 0;">
+          <label style="font-size: 12px; color: #666; display: flex; flex-direction: column; gap: 5px;">
+            <span>课程名称前缀:</span>
+            <div style="display: flex; gap: 5px;">
+              <input type="text" id="course-prefix-input" value="${config.coursePrefix || ''}" placeholder="例如: 计算机组成原理"
+                     style="flex: 1; padding: 5px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px;">
+              <button class="download-btn download-btn-secondary" id="save-prefix-btn" style="padding: 5px 12px; font-size: 12px;">
+                保存
+              </button>
+            </div>
+            <span style="font-size: 11px; color: #999;">文件下载时会自动添加此前缀</span>
+          </label>
         </div>
-
-        <button class="download-btn download-btn-primary" id="scan-resources-btn">
-          🔍 扫描当前页面资源
-        </button>
-
-        <button class="download-btn download-btn-success" id="download-all-btn" style="display:none;">
-          📦 下载全部资源
-        </button>
-
-        <div class="resource-list" id="resource-list" style="display:none;"></div>
 
         <hr style="margin: 15px 0; border: none; border-top: 1px solid #e0e0e0;">
 
@@ -70,10 +73,14 @@ export function createDownloadPanel(): void {
   });
 
   // 绑定按钮事件
-  $('#scan-resources-btn').on('click', scanResources);
-  $('#download-all-btn').on('click', downloadAllResources);
   $('#auto-view-pages-btn').on('click', startAutoViewPages);
   $('#auto-hang-all-btn').on('click', startAutoHangAll);
+
+  // 绑定保存前缀按钮
+  $('#save-prefix-btn').on('click', function () {
+    const prefix = ($('#course-prefix-input').val() as string).trim();
+    updateCoursePrefix(prefix);
+  });
 
   // 使面板可拖动
   makeDraggable(panel[0]);

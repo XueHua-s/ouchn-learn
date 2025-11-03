@@ -89,6 +89,26 @@ export function injectStyles(): void {
       box-shadow: 0 4px 12px rgba(56, 239, 125, 0.4);
     }
 
+    .download-btn-warning {
+      background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+      color: #fff;
+    }
+
+    .download-btn-warning:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(245, 87, 108, 0.4);
+    }
+
+    .download-btn-secondary {
+      background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
+      color: #333;
+    }
+
+    .download-btn-secondary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(168, 237, 234, 0.4);
+    }
+
     .download-status {
       padding: 8px;
       margin: 8px 0;
@@ -110,47 +130,6 @@ export function injectStyles(): void {
     .download-status-warning {
       background: #fff3e0;
       color: #f57c00;
-    }
-
-    .resource-list {
-      max-height: 300px;
-      overflow-y: auto;
-      margin: 10px 0;
-    }
-
-    .resource-item {
-      padding: 8px;
-      margin: 5px 0;
-      background: #f9f9f9;
-      border-radius: 6px;
-      font-size: 12px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      border-left: 3px solid #667eea;
-    }
-
-    .resource-name {
-      flex: 1;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      margin-right: 8px;
-    }
-
-    .resource-download-btn {
-      padding: 4px 10px;
-      background: #667eea;
-      color: #fff;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 11px;
-      white-space: nowrap;
-    }
-
-    .resource-download-btn:hover {
-      background: #5568d3;
     }
   `;
   document.head.appendChild(style);

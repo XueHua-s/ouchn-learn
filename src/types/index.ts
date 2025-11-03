@@ -1,8 +1,12 @@
 export interface Resource {
-  type: 'video' | 'document' | 'audio' | 'courseware';
+  type: 'video' | 'document' | 'audio' | 'courseware' | 'material';
   icon: string;
   name: string;
   url: string;
+  size?: string;
+  completed?: boolean;
+  activityId?: string;
+  uploadId?: string;
 }
 
 export interface PageElement {
@@ -31,4 +35,18 @@ export interface ActivityReadRequest {
 
 export interface ActivityReadResponse {
   completeness: string;
+}
+
+export interface MaterialAttachment {
+  name: string;
+  extension: string;
+  size: string;
+  uploadId: string;
+  activityId: string;
+  viewUrl?: string;
+  downloadUrl?: string;
+}
+
+export interface CourseConfig {
+  coursePrefix: string;
 }

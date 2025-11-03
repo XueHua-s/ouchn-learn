@@ -1,5 +1,7 @@
 export const STORAGE_KEY = 'gk_auto_view_state';
 export const RETURN_URL_KEY = 'gk_return_url';
+export const COURSE_CONFIG_KEY = 'gk_course_config';
+export const MATERIAL_CACHE_KEY = 'gk_material_cache';
 
 export const API_BASE_URL = 'https://lms.ouchn.cn/api';
 
