@@ -355,37 +355,18 @@ function extractQuestions(): Question[] {
 }
 
 /**
- * 将题目转换为文本格式供AI处理
+ * 调用AI API获取答案
  */
-function questionsToText(questions: Question[]): string {
-  let text = '';
+async function getAnswersFromAI(config: ExamConfig, htmlContent: string): Promise<AIResponse> {
+  let prompt = `你是一个专业的考试答题助手。请仔细分析以下HTML内容中的题目，并给出正确答案。
 
-  questions.forEach((q) => {
-    text += `\n题目 ${q.index} (${q.type}, ${q.points}分):\n`;
-    text += `${q.description}\n`;
+HTML中包含着试卷的题目。你需要解析这些题目并回答。
 
-    if (q.options && q.options.length > 0) {
-      q.options.forEach((opt) => {
-        text += `${opt.label}. ${opt.content}\n`;
-      });
-    }
-    text += '\n';
-  });
-
-  return text;
-}
-
-/**
- * 调用OpenAI API获取答案
- */
-async function getAnswersFromAI(config: ExamConfig, questions: Question[]): Promise<AIResponse> {
-  const questionText = questionsToText(questions);
-
-  let prompt = `你是一个专业的考试答题助手。请仔细分析以下题目，并给出正确答案。
-
-对于选择题（single_selection）和判断题（true_or_false），请返回选项的字母（如A、B、C、D）。
-对于多选题（multiple_selection），请返回多个选项字母，用逗号分隔（如A,C,D）。
-对于填空题（fill_in_blank）和简答题（short_answer），请直接给出答案文本。
+- **题目序号**: 在 \`.subject-resort-index\` 中可以找到。
+- **题目类型**: 在 \`.summary-sub-title\` 中可以找到 (单选题, 多选题, 判断题, 填空题, 简答题).
+- **单选题/判断题**: 返回单个选项字母 (A, B, C...).
+- **多选题**: 返回所有正确选项的字母，用逗号分隔 (e.g., A,C,D).
+- **填空题/简答题**: 直接返回答案文本.
 `;
 
   // 如果有自定义提示词，添加到prompt中
@@ -394,8 +375,10 @@ async function getAnswersFromAI(config: ExamConfig, questions: Question[]): Prom
   }
 
   prompt += `
-题目内容：
-${questionText}
+HTML内容如下:
+\`\`\`html
+${htmlContent}
+\`\`\`
 
 请以JSON格式返回答案，格式如下：
 {
@@ -454,14 +437,20 @@ ${questionText}
     const data = await response.json();
     const content = data.choices[0]?.message?.content || '';
 
-    // 提取JSON内容（可能被```json包裹）
+    // 提取JSON内容（可能被\`\`\`json包裹）
     let jsonContent = content;
     const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
     if (jsonMatch) {
       jsonContent = jsonMatch[1];
     }
 
-    return JSON.parse(jsonContent);
+    try {
+      return JSON.parse(jsonContent);
+    } catch (e) {
+      console.error('解析AI返回的JSON失败', e);
+      console.error('原始返回内容:', content);
+      throw new Error('AI返回的JSON格式不正确');
+    }
   } catch (error) {
     console.error('AI答题错误:', error);
     throw error;
@@ -648,7 +637,7 @@ async function startAutoExam(config: ExamConfig): Promise<void> {
   try {
     showStatus('正在提取题目...', 'info');
 
-    // 提取题目
+    // 提取题目用于后续填入答案
     const questions = extractQuestions();
     console.log('提取到的题目:', questions);
 
@@ -657,10 +646,18 @@ async function startAutoExam(config: ExamConfig): Promise<void> {
       return;
     }
 
+    // 获取题目区域的HTML内容
+    const paperContent = document.querySelector('.paper-content.card');
+    if (!paperContent) {
+      showStatus('未找到题目区域 (.paper-content.card)，无法继续', 'error');
+      return;
+    }
+    const htmlContent = paperContent.outerHTML;
+
     showStatus(`已提取 ${questions.length} 道题目，正在调用AI分析...`, 'info');
 
     // 调用AI获取答案
-    const aiResponse = await getAnswersFromAI(config, questions);
+    const aiResponse = await getAnswersFromAI(config, htmlContent);
     console.log('AI返回的答案:', aiResponse);
 
     showStatus('正在填写答案...', 'info');
