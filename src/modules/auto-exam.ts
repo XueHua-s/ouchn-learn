@@ -358,7 +358,16 @@ function extractQuestions(): Question[] {
  * 调用AI API获取答案
  */
 async function getAnswersFromAI(config: ExamConfig, htmlContent: string): Promise<AIResponse> {
-  let prompt = `你是一个专业的考试答题助手。请仔细分析以下HTML内容中的题目，并给出正确答案。
+  let prompt = `你是一个非常聪明和严谨的考试答题助手。你的任务是仔细分析给定的HTML中的题目，确保给出最准确的答案。
+
+请遵循以下思考过程来回答每个问题：
+1.  **理解题目**: 仔细阅读题目描述和所有选项。
+2.  **分析与推理**: 根据你的知识库，分析问题并推导出正确的答案。对于不确定的题目，要进行深入的思考。
+3.  **格式化答案**: 将最终答案格式化为指定的JSON格式。
+
+---
+
+现在，请分析以下HTML内容中的题目：
 
 HTML中包含着试卷的题目。你需要解析这些题目并回答。
 
@@ -380,7 +389,9 @@ HTML内容如下:
 ${htmlContent}
 \`\`\`
 
-请以JSON格式返回答案，格式如下：
+---
+
+请严格按照以下JSON格式返回你的最终答案，不要包含任何思考过程或其他额外文本。
 {
   "questions": [
     {
