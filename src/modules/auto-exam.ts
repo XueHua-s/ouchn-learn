@@ -503,17 +503,29 @@ function fillAnswers(questions: Question[], aiResponse: AIResponse): void {
       }
     } else if (question.type === 'multiple_selection') {
       // 多选题
-      const answerLabels = typeof answer === 'string' ? answer.split(',').map((a) => a.trim()) : [];
-      answerLabels.forEach((label) => {
-        const option = question.options?.find((opt) => opt.label === label);
-        if (option) {
-          const input = subjectEl.querySelector(`input[ng-value="${option.value}"]`) as HTMLInputElement;
-          if (input && !input.checked) {
-            input.click();
-            console.log(`题目 ${question.index}: 已选择 ${label}`);
+      const answerLabels = Array.isArray(answer)
+        ? answer.map((a) => String(a).trim())
+        : typeof answer === 'string'
+          ? answer.split(',').map((a) => a.trim())
+          : [];
+
+      if (answerLabels.length > 0) {
+        answerLabels.forEach((label) => {
+          const optionElements = Array.from(subjectEl.querySelectorAll('.option'));
+          const targetOptionEl = optionElements.find((optEl) => {
+            const optionIndexEl = optEl.querySelector('.option-index');
+            return optionIndexEl && optionIndexEl.textContent?.trim().toUpperCase() === label.toUpperCase();
+          });
+
+          if (targetOptionEl) {
+            const input = targetOptionEl.querySelector('input[type="checkbox"]') as HTMLInputElement;
+            if (input && !input.checked) {
+              input.click();
+              console.log(`题目 ${question.index}: 已选择 ${label}`);
+            }
           }
-        }
-      });
+        });
+      }
     } else if (question.type === 'fill_in_blank') {
       // 填空题
       const answerInputs = subjectEl.querySelectorAll('.___answer[contenteditable="true"]');
