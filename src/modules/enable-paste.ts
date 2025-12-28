@@ -17,6 +17,11 @@ function allowClipboardEvents(element: HTMLElement): void {
   element.oncopy = null;
   element.oncut = null;
 
+  // Avoid blocking editor paste handlers on contenteditable nodes.
+  if (!(element instanceof HTMLTextAreaElement)) {
+    return;
+  }
+
   for (const eventName of CLIPBOARD_EVENTS) {
     element.addEventListener(
       eventName,
