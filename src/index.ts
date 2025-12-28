@@ -3,6 +3,7 @@ import { createDownloadPanel } from './modules/panel';
 import { checkAndResumeAutoView } from './modules/auto-view';
 import { initLegacyHangEvents, startAutoButtonScanning } from './modules/legacy-hang';
 import { initAutoExam, isExamPage } from './modules/auto-exam';
+import { enableHomeworkCopyPaste } from './modules/enable-paste';
 
 /**
  * 主入口函数
@@ -22,6 +23,9 @@ import { initAutoExam, isExamPage } from './modules/auto-exam';
   // 初始化原有挂机功能
   initLegacyHangEvents();
   startAutoButtonScanning();
+
+  // 作业富文本允许复制粘贴
+  enableHomeworkCopyPaste();
 
   // 初始化AI自动答题功能
   console.log('[主入口] 准备初始化AI答题功能...');
