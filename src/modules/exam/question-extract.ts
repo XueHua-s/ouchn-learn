@@ -224,6 +224,37 @@ export function extractQuestions(): Question[] {
       }
     }
 
+    // 匹配题：提取左侧题干项和答案池
+    if (question.type === 'matching') {
+      const matchingItems: Array<{ stem: string; poolLabel: string }> = [];
+      const qText = element.textContent || '';
+
+      // 通过 ①②③ 序号提取题干项
+      const circledNums = qText.match(/[①②③④⑤⑥⑦⑧⑨⑩][^①②③④⑤⑥⑦⑧⑨⑩\n]*/g);
+      if (circledNums) {
+        circledNums.forEach((seg) => {
+          const text = seg.trim();
+          if (text.length > 1) matchingItems.push({ stem: text, poolLabel: '' });
+        });
+      }
+
+      // 提取答案池选项
+      const poolLabels: string[] = [];
+      const poolElements = element.querySelectorAll(
+        '.match-item-right, .answer-pool-item, .match-target, [dnd-list] > *, .drag-item',
+      );
+      poolElements.forEach((poolEl) => {
+        const text = poolEl.textContent?.trim() || '';
+        if (text && text.length > 1) poolLabels.push(text);
+      });
+
+      question.matchingItems = matchingItems;
+      question.modelHints.push(
+        `匹配题：左侧有 ${matchingItems.length} 项，答案池有 ${poolLabels.length} 个选项`,
+        `答案池: ${poolLabels.join(' | ')}`,
+      );
+    }
+
     questions.push(question);
   });
 

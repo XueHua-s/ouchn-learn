@@ -8,6 +8,7 @@ export type QuestionType =
   | 'true_or_false'
   | 'fill_in_blank'
   | 'short_answer'
+  | 'matching'
   | 'unknown';
 
 export interface ExamConfig {
@@ -44,6 +45,8 @@ export interface Question {
   rawClassName: string;
   rawTypeText: string;
   modelHints: string[];
+  /** 匹配题专用：左侧题干项 */
+  matchingItems?: Array<{ stem: string; poolLabel: string }>;
 }
 
 export interface AIResponse {
@@ -80,6 +83,7 @@ export const TYPE_TEXT_MAP: Array<{ pattern: RegExp; type: QuestionType }> = [
   { pattern: /判断题/, type: 'true_or_false' },
   { pattern: /填空题/, type: 'fill_in_blank' },
   { pattern: /简答题|综合题|应用题|论述题|分析题|计算题|编程题/, type: 'short_answer' },
+  { pattern: /匹配题|配对题/, type: 'matching' },
 ];
 
 /** class -> 内部类型映射（兜底） */
@@ -95,6 +99,8 @@ export const TYPE_CLASS_MAP: Array<{ className: string; type: QuestionType }> = 
   { className: 'application', type: 'short_answer' },
   { className: 'question_answer', type: 'short_answer' },
   { className: 'answer_question', type: 'short_answer' },
+  { className: 'matching', type: 'matching' },
+  { className: 'match', type: 'matching' },
 ];
 
 /** 图片题关键词 */
@@ -110,6 +116,26 @@ export const IMAGE_HINT_KEYWORDS = [
   '示意图',
   '框图',
 ];
+
+/** AI 返回的无效答案模式，这些不应填入页面 */
+const INVALID_ANSWER_PATTERNS = [
+  /^图片信息不足$/,
+  /^无法(判断|确定|识别|作答)/,
+  /^(无|没有)(法|足够)(的?)信息/,
+  /^本题无法/,
+  /^根据图片.*无法/,
+  /^无法识别/,
+];
+
+/** 判断 AI 返回的答案是否有效（非空、非占位文本） */
+export function isValidAnswer(answer: string | string[]): boolean {
+  if (Array.isArray(answer)) {
+    return answer.length > 0 && answer.some((a) => isValidAnswer(a));
+  }
+  const text = String(answer).trim();
+  if (!text) return false;
+  return !INVALID_ANSWER_PATTERNS.some((p) => p.test(text));
+}
 
 /** 推理模型正则：不支持 temperature */
 export const REASONING_MODEL_RE = /^(o1|o1-mini|o1-preview|o3|o3-mini|o3-pro|o4-mini|gpt-5)/i;

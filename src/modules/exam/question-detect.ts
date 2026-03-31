@@ -43,6 +43,18 @@ export function detectQuestionType(element: Element): { type: QuestionType; rawT
     return { type: 'multiple_selection', rawTypeText: typeText || 'inferred_multiple_selection' };
   }
 
+  // 匹配题检测：答案池 + 拖拽区域 + 序号标记
+  const fullText = element.textContent || '';
+  if (
+    /匹配题/.test(typeText) ||
+    element.querySelector('.match-area, .matching-area, .answer-pool, .drag-drop-area') ||
+    (/答案池/.test(fullText) && /[①②③④⑤⑥⑦⑧⑨⑩]/.test(fullText)) ||
+    /请从右侧拖入/.test(fullText) ||
+    element.querySelector('[dnd-draggable], [dnd-list], [ng-drop]')
+  ) {
+    return { type: 'matching', rawTypeText: typeText || 'inferred_matching' };
+  }
+
   // 如果有 contenteditable 或 textarea，可能是填空/简答
   const editables = element.querySelectorAll('[contenteditable="true"], textarea');
   if (editables.length > 0) {

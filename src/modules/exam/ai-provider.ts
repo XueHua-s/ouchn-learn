@@ -4,7 +4,7 @@
 
 import pLimit from 'p-limit';
 import type { ExamConfig, Question, AIResponse, ExamStats } from '@/types/exam';
-import { REASONING_MODEL_RE, log, warn, error } from '@/types/exam';
+import { REASONING_MODEL_RE, log, warn, error, isValidAnswer } from '@/types/exam';
 import { resolveImageBase64, sanitizeImageDataUri } from './question-detect';
 import { findSubjectElement } from './question-extract';
 
@@ -22,9 +22,10 @@ function buildSystemPrompt(): string {
 4. 单空填空题 answer 返回字符串。
 5. 多空填空题 answer 返回字符串数组，顺序与空位一致。
 6. 简答/综合/应用题 answer 返回字符串。
-7. 含图片时结合图片内容判断。图片不可见则 answer 返回 "图片信息不足"。
+7. 含图片时结合图片内容判断。图片不可见则尽力根据文本推断。
 8. 不要编造图片细节。保持 index 与输入一致。
-9. 无法确定也必须给出最合理结果。
+9. 无法确定也必须给出最合理结果，不要返回空答案。
+10. 匹配题 answer 返回 JSON 对象，key 是左侧题干标识(如"①")，value 是对应的右侧答案标签(如"A"或"F")。
 
 输出格式：
 { "index": 1, "type": "single_selection", "answer": "C" }`;
@@ -47,6 +48,10 @@ function buildSingleQuestionPrompt(q: Question, customPrompt: string): string {
   if (q.blankCount > 0) {
     item.blankCount = q.blankCount;
     item.note = `此题有${q.blankCount}个空位，请返回长度为${q.blankCount}的字符串数组`;
+  }
+  if (q.matchingItems && q.matchingItems.length > 0) {
+    item.matchingItems = q.matchingItems.map((m) => m.stem);
+    item.note = '匹配题：请返回 JSON 对象，key 是左侧标识(如①)，value 是对应的右侧答案标签';
   }
   if (q.modelHints.length > 0) {
     item.hints = q.modelHints;
@@ -187,11 +192,18 @@ function parseSingleAnswer(
     // FIXED: 逐题模式下强制用 expectedIndex，不信任 AI 返回的 index，
     // 防止 AI 返回错误题号导致答案错配
     if (parsed.answer !== undefined) {
+      if (!isValidAnswer(parsed.answer)) {
+        warn(`题目 ${expectedIndex}: AI 返回无效答案 "${String(parsed.answer).substring(0, 50)}"，丢弃`);
+        return null;
+      }
       return { index: expectedIndex, answer: parsed.answer };
     }
-    // 可能返回了 { questions: [{ ... }] } 格式
     if (parsed.questions?.[0]?.answer !== undefined) {
       const q = parsed.questions[0];
+      if (!isValidAnswer(q.answer)) {
+        warn(`题目 ${expectedIndex}: AI 返回无效答案，丢弃`);
+        return null;
+      }
       return { index: expectedIndex, answer: q.answer };
     }
     warn(`题目 ${expectedIndex}: AI 返回结构无 answer 字段`);

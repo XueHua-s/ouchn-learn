@@ -98,7 +98,7 @@ async function startAutoExam(config: ExamConfig): Promise<void> {
     showStatus(`AI 返回 ${aiResponse.questions.length} 道答案，正在填写...`, 'info');
 
     // 填写答案
-    fillAnswers(questions, aiResponse, stats);
+    await fillAnswers(questions, aiResponse, stats);
 
     // 打印统计
     printExamStats(stats);
