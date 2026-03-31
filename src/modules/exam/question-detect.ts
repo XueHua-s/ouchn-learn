@@ -131,56 +131,54 @@ function getBase64MagicHex(b64Data: string, byteCount = 4): string {
 }
 
 /**
- * 校验 base64 图片数据的实际格式，返回安全的 data URI 或 null
+ * 校验 base64 图片数据的实际格式，只放行 jpeg/png，拒绝其他一切。
  * FIXED: Chrome canvas 对 webp 源图 toDataURL('image/jpeg') 返回的头声称是 jpeg,
  *        但二进制实际仍是 webp (RIFF header)，导致 OpenAI API 500 错误。
  *        通过魔数校验确保数据与声明的 MIME 一致，不一致则丢弃。
  */
 export function sanitizeImageDataUri(input: string): string | null {
-  let mimeType: string;
-  let b64Data: string;
-
-  if (input.startsWith('data:image/')) {
-    const match = input.match(/^data:(image\/[^;]+);base64,(.+)$/s);
-    if (!match) return null;
-    mimeType = match[1];
-    b64Data = match[2];
-  } else {
-    mimeType = 'image/jpeg';
-    b64Data = input;
-  }
-
-  const magic = getBase64MagicHex(b64Data);
-
-  // RIFF = webp 文件头，无论声明什么 MIME 都拒绝
-  if (magic.startsWith('52494646')) {
-    warn('图片实际为 webp (RIFF header)，与声明的', mimeType, '不符，跳过');
-    return null;
-  }
-
-  // 校验 jpeg: FFD8FF
-  if (mimeType === 'image/jpeg' && !magic.startsWith('FFD8FF')) {
-    if (magic.startsWith('89504E47')) {
-      return `data:image/png;base64,${b64Data}`;
+  // 解析 data URI
+  const match = input.match(/^data:(image\/[^;]+);base64,(.+)$/s);
+  if (!match) {
+    // 不是标准 data:image/...;base64,... 格式，当作裸 base64 处理
+    if (!input.startsWith('data:') && input.length > 100) {
+      return sanitizeRawBase64(input);
     }
-    warn('图片声明为 jpeg 但魔数不匹配:', magic, '跳过');
     return null;
   }
 
-  // 校验 png: 89504E47
-  if (mimeType === 'image/png' && !magic.startsWith('89504E47')) {
-    if (magic.startsWith('FFD8FF')) {
-      return `data:image/jpeg;base64,${b64Data}`;
-    }
-    warn('图片声明为 png 但魔数不匹配:', magic, '跳过');
+  const b64Data = match[2];
+
+  // base64 数据过短，不可能是合法图片
+  if (b64Data.length < 100) {
+    warn('图片 base64 数据过短，跳过');
     return null;
   }
 
-  return `data:${mimeType};base64,${b64Data}`;
+  return sanitizeRawBase64(b64Data);
 }
 
 /**
- * 将 webp 等不安全格式的 data URI 通过 canvas 重编码为 jpeg/png
+ * 对裸 base64 数据做魔数校验，只放行 jpeg (FFD8FF) 和 png (89504E47)
+ */
+function sanitizeRawBase64(b64Data: string): string | null {
+  const magic = getBase64MagicHex(b64Data);
+
+  if (magic.startsWith('FFD8FF')) {
+    return `data:image/jpeg;base64,${b64Data}`;
+  }
+  if (magic.startsWith('89504E47')) {
+    return `data:image/png;base64,${b64Data}`;
+  }
+
+  // 其他格式一律拒绝（包括 RIFF/webp、gif、bmp 等）
+  warn('图片魔数不是 jpeg/png:', magic.substring(0, 8), '拒绝发送');
+  return null;
+}
+
+/**
+ * 将 webp 等不安全格式的 data URI 通过 canvas 重编码为 jpeg/png。
+ * FIXED: 失败时返回 null 而不是原始坏数据，绝不放行无法转换的图片。
  */
 async function convertDataUriViaCanvas(dataUri: string): Promise<string | null> {
   try {
@@ -191,16 +189,22 @@ async function convertDataUriViaCanvas(dataUri: string): Promise<string | null> 
       img.src = dataUri;
       setTimeout(() => resolve(false), 3000);
     });
-    if (!loaded) return dataUri; // 转换失败则原样返回
+    if (!loaded) {
+      warn('convertDataUriViaCanvas: 图片加载失败，丢弃');
+      return null;
+    }
     const canvas = document.createElement('canvas');
     canvas.width = img.naturalWidth;
     canvas.height = img.naturalHeight;
     const ctx = canvas.getContext('2d');
-    if (!ctx) return dataUri;
+    if (!ctx) return null;
     ctx.drawImage(img, 0, 0);
-    return canvasToSafeBase64(canvas);
+    const result = canvasToSafeBase64(canvas);
+    // 二次校验：确保 canvas 输出的确是 jpeg/png
+    return sanitizeImageDataUri(result);
   } catch {
-    return dataUri;
+    warn('convertDataUriViaCanvas: 异常，丢弃');
+    return null;
   }
 }
 
@@ -230,23 +234,29 @@ async function captureQuestionImage(element: Element): Promise<string | null> {
 }
 
 /**
- * 尝试获取图片的 base64 数据
- * 优先：直接读取 img src (如果是 data URI 或同源)
- * 兜底：canvas 截图整个题目区域
+ * 尝试获取图片的 base64 数据，保证输出只有 jpeg/png 或 null。
+ * 所有路径的产出都必须经过 sanitizeImageDataUri 校验。
+ * 任何失败都降级为对整道题的 canvas 截图。
  */
 export async function resolveImageBase64(image: QuestionImage, questionElement: Element): Promise<string | null> {
   const { src } = image;
 
-  // 已经是 base64
+  // 路径 1：已经是 data URI
   if (src.startsWith('data:image/')) {
-    // FIXED: webp 格式可能被 OpenAI API 拒绝，需要通过 canvas 转换为 jpeg/png
-    if (src.startsWith('data:image/webp')) {
-      return convertDataUriViaCanvas(src);
+    // 非 jpeg/png（如 webp）尝试 canvas 转码
+    if (!src.startsWith('data:image/jpeg') && !src.startsWith('data:image/png')) {
+      const converted = await convertDataUriViaCanvas(src);
+      if (converted) return converted;
+      // 转码失败，降级截图
+      return captureQuestionImage(questionElement);
     }
-    return src;
+    // jpeg/png data URI 也要过 sanitize（防止头与实际不符）
+    const safe = sanitizeImageDataUri(src);
+    if (safe) return safe;
+    return captureQuestionImage(questionElement);
   }
 
-  // 尝试通过 canvas 读取 img 元素
+  // 路径 2：远程/同源 URL，通过 canvas 重编码
   if (src && src !== 'in-rich-content' && !src.startsWith('data:')) {
     try {
       const img = new Image();
@@ -272,7 +282,10 @@ export async function resolveImageBase64(image: QuestionImage, questionElement: 
         const ctx = canvas.getContext('2d');
         if (ctx) {
           ctx.drawImage(img, 0, 0);
-          return canvasToSafeBase64(canvas, 0.85);
+          const result = canvasToSafeBase64(canvas, 0.85);
+          // 二次校验
+          const safe = sanitizeImageDataUri(result);
+          if (safe) return safe;
         }
       }
     } catch {
@@ -280,6 +293,8 @@ export async function resolveImageBase64(image: QuestionImage, questionElement: 
     }
   }
 
-  // 兜底：对整个题目区域截图
-  return captureQuestionImage(questionElement);
+  // 路径 3：兜底截图（captureQuestionImage 内部已用 canvasToSafeBase64）
+  const screenshot = await captureQuestionImage(questionElement);
+  if (!screenshot) return null;
+  return sanitizeImageDataUri(screenshot);
 }

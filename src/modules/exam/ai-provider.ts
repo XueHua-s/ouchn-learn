@@ -321,7 +321,6 @@ export async function callProvider(config: ExamConfig, questions: Question[], st
   const imageQuestions = questions.filter((q) => q.hasImage && q.images.length > 0);
   stats.imageQuestions = imageQuestions.map((q) => q.index);
 
-  let hasVisionContent = false;
   const resolvedImageBase64List: string[] = [];
 
   if (imageQuestions.length > 0) {
@@ -333,9 +332,10 @@ export async function callProvider(config: ExamConfig, questions: Question[], st
 
       for (const img of q.images) {
         const base64 = await resolveImageBase64(img, subjectEl);
-        if (base64) {
+        // resolveImageBase64 的返回值已经过 sanitizeImageDataUri 校验，
+        // 但这里做最终防线：再次确认是合法 jpeg/png data URI
+        if (base64 && sanitizeImageDataUri(base64)) {
           resolvedImageBase64List.push(base64);
-          hasVisionContent = true;
           if (!stats.visionModeQuestions.includes(q.index)) {
             stats.visionModeQuestions.push(q.index);
           }
@@ -343,30 +343,36 @@ export async function callProvider(config: ExamConfig, questions: Question[], st
           if (!stats.degradedImageQuestions.includes(q.index)) {
             stats.degradedImageQuestions.push(q.index);
           }
-          warn(`题目 ${q.index} 的图片无法提取，降级为文本模式`);
+          warn(`题目 ${q.index} 的图片无法安全提取，降级为文本模式`);
         }
       }
     }
   }
 
+  // 只有确实拿到了合法图片才走多模态，否则退回纯文本
+  const useVision = resolvedImageBase64List.length > 0;
+  if (imageQuestions.length > 0) {
+    log(
+      `图片提取结果: ${resolvedImageBase64List.length} 张合法图片,`,
+      `${stats.degradedImageQuestions.length} 张降级,`,
+      useVision ? '走多模态' : '退回纯文本',
+    );
+  }
+
   let rawContent: string;
 
   if (config.provider === 'openai') {
-    if (hasVisionContent && resolvedImageBase64List.length > 0) {
-      log('使用 OpenAI 多模态模式');
+    if (useVision) {
       const visionContent = buildOpenAIVisionContent(userPromptText, resolvedImageBase64List);
       rawContent = await callOpenAI(config, systemPrompt, visionContent);
     } else {
-      log('使用 OpenAI 纯文本模式');
       rawContent = await callOpenAI(config, systemPrompt, userPromptText);
     }
   } else if (config.provider === 'gemini') {
-    if (hasVisionContent && resolvedImageBase64List.length > 0) {
-      log('使用 Gemini 多模态模式');
+    if (useVision) {
       const visionParts = buildGeminiVisionParts(userPromptText, resolvedImageBase64List);
       rawContent = await callGemini(config, systemPrompt, visionParts);
     } else {
-      log('使用 Gemini 纯文本模式');
       rawContent = await callGemini(config, systemPrompt, userPromptText);
     }
   } else {
