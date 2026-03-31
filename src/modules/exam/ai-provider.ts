@@ -184,13 +184,15 @@ function parseSingleAnswer(
 
   try {
     const parsed = JSON.parse(content);
+    // FIXED: 逐题模式下强制用 expectedIndex，不信任 AI 返回的 index，
+    // 防止 AI 返回错误题号导致答案错配
     if (parsed.answer !== undefined) {
-      return { index: parsed.index ?? expectedIndex, answer: parsed.answer };
+      return { index: expectedIndex, answer: parsed.answer };
     }
     // 可能返回了 { questions: [{ ... }] } 格式
     if (parsed.questions?.[0]?.answer !== undefined) {
       const q = parsed.questions[0];
-      return { index: q.index ?? expectedIndex, answer: q.answer };
+      return { index: expectedIndex, answer: q.answer };
     }
     warn(`题目 ${expectedIndex}: AI 返回结构无 answer 字段`);
     return null;
