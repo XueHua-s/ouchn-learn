@@ -115,6 +115,71 @@ function canvasToSafeBase64(canvas: HTMLCanvasElement, quality = 0.85): string {
 }
 
 /**
+ * 从 base64 数据中提取前几个字节的十六进制，用于魔数校验
+ */
+function getBase64MagicHex(b64Data: string, byteCount = 4): string {
+  try {
+    const raw = atob(b64Data.substring(0, Math.ceil((byteCount * 4) / 3) + 4));
+    return Array.from(raw)
+      .slice(0, byteCount)
+      .map((c) => c.charCodeAt(0).toString(16).padStart(2, '0'))
+      .join('')
+      .toUpperCase();
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * 校验 base64 图片数据的实际格式，返回安全的 data URI 或 null
+ * FIXED: Chrome canvas 对 webp 源图 toDataURL('image/jpeg') 返回的头声称是 jpeg,
+ *        但二进制实际仍是 webp (RIFF header)，导致 OpenAI API 500 错误。
+ *        通过魔数校验确保数据与声明的 MIME 一致，不一致则丢弃。
+ */
+export function sanitizeImageDataUri(input: string): string | null {
+  let mimeType: string;
+  let b64Data: string;
+
+  if (input.startsWith('data:image/')) {
+    const match = input.match(/^data:(image\/[^;]+);base64,(.+)$/s);
+    if (!match) return null;
+    mimeType = match[1];
+    b64Data = match[2];
+  } else {
+    mimeType = 'image/jpeg';
+    b64Data = input;
+  }
+
+  const magic = getBase64MagicHex(b64Data);
+
+  // RIFF = webp 文件头，无论声明什么 MIME 都拒绝
+  if (magic.startsWith('52494646')) {
+    warn('图片实际为 webp (RIFF header)，与声明的', mimeType, '不符，跳过');
+    return null;
+  }
+
+  // 校验 jpeg: FFD8FF
+  if (mimeType === 'image/jpeg' && !magic.startsWith('FFD8FF')) {
+    if (magic.startsWith('89504E47')) {
+      return `data:image/png;base64,${b64Data}`;
+    }
+    warn('图片声明为 jpeg 但魔数不匹配:', magic, '跳过');
+    return null;
+  }
+
+  // 校验 png: 89504E47
+  if (mimeType === 'image/png' && !magic.startsWith('89504E47')) {
+    if (magic.startsWith('FFD8FF')) {
+      return `data:image/jpeg;base64,${b64Data}`;
+    }
+    warn('图片声明为 png 但魔数不匹配:', magic, '跳过');
+    return null;
+  }
+
+  return `data:${mimeType};base64,${b64Data}`;
+}
+
+/**
  * 将 webp 等不安全格式的 data URI 通过 canvas 重编码为 jpeg/png
  */
 async function convertDataUriViaCanvas(dataUri: string): Promise<string | null> {

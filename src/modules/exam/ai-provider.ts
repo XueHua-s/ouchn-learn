@@ -4,7 +4,7 @@
 
 import type { ExamConfig, Question, AIResponse, ExamStats } from '@/types/exam';
 import { REASONING_MODEL_RE, log, warn, error } from '@/types/exam';
-import { resolveImageBase64 } from './question-detect';
+import { resolveImageBase64, sanitizeImageDataUri } from './question-detect';
 import { findSubjectElement } from './question-extract';
 
 // ============================================================
@@ -118,11 +118,13 @@ function buildOpenAIVisionContent(
   parts.push({ type: 'text', text: textContent });
 
   imageBase64List.forEach((b64) => {
-    const url = b64.startsWith('data:image/') ? b64 : `data:image/jpeg;base64,${b64}`;
-    parts.push({
-      type: 'image_url',
-      image_url: { url, detail: 'high' },
-    });
+    const safeUri = sanitizeImageDataUri(b64);
+    if (safeUri) {
+      parts.push({
+        type: 'image_url',
+        image_url: { url: safeUri, detail: 'high' },
+      });
+    }
   });
 
   return parts;
@@ -140,26 +142,15 @@ function buildGeminiVisionParts(
   parts.push({ text: textContent });
 
   imageBase64List.forEach((b64) => {
-    let data = b64;
-    let mimeType = 'image/jpeg';
+    const safeUri = sanitizeImageDataUri(b64);
+    if (!safeUri) return;
 
-    if (b64.startsWith('data:')) {
-      const match = b64.match(/^data:(image\/[^;]+);base64,(.+)$/s);
-      if (match) {
-        mimeType = match[1];
-        data = match[2];
-      } else {
-        // 无法解析 data URI，尝试去掉前缀
-        const commaIdx = b64.indexOf(',');
-        if (commaIdx !== -1) {
-          data = b64.substring(commaIdx + 1);
-        }
-      }
+    const match = safeUri.match(/^data:(image\/[^;]+);base64,(.+)$/s);
+    if (match) {
+      parts.push({
+        inlineData: { mimeType: match[1], data: match[2] },
+      });
     }
-
-    parts.push({
-      inlineData: { mimeType, data },
-    });
   });
 
   return parts;
