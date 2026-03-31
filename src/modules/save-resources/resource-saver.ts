@@ -1,113 +1,13 @@
 /**
- * 等待DOM稳定
+ * 视频下载与文档转 PDF 保存
  */
-async function waitForDOMStable(timeout = 2000): Promise<void> {
-  return new Promise((resolve) => {
-    let timeoutId: number;
-    const observer = new MutationObserver(() => {
-      clearTimeout(timeoutId);
-      timeoutId = window.setTimeout(() => {
-        observer.disconnect();
-        resolve();
-      }, 500);
-    });
 
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-    });
+import type { ResourceItem } from '@/types';
+import { waitForDOMStable } from './tree-scanner';
 
-    // 设置最大等待时间
-    setTimeout(() => {
-      observer.disconnect();
-      resolve();
-    }, timeout);
-  });
-}
-
-/**
- * 展开所有树形菜单
- */
-async function expandAllTrees(statusCallback?: (message: string) => void): Promise<void> {
-  statusCallback?.('正在展开所有菜单...');
-
-  // 需要递归展开，因为展开父菜单后可能会出现新的子菜单
-  let expanded = 0;
-  let round = 0;
-  const maxRounds = 10; // 防止无限循环
-
-  while (round < maxRounds) {
-    round++;
-
-    // 查找所有折叠的子菜单（箭头为rotate(180deg)的是已展开，没有rotate或rotate(0deg)的是折叠的）
-    const collapsedMenus = $('.full-screen-mode-sidebar-sub-menu-title svg')
-      .filter(function () {
-        const style = $(this).attr('style') || '';
-        // 已展开的箭头包含 rotate(180deg)，未展开的不包含
-        return !style.includes('rotate(180deg)');
-      })
-      .parent();
-
-    if (collapsedMenus.length === 0) {
-      break;
-    }
-
-    console.log(`[保存资源] 第 ${round} 轮，找到 ${collapsedMenus.length} 个折叠的菜单`);
-
-    for (let i = 0; i < collapsedMenus.length; i++) {
-      const menu = collapsedMenus[i];
-      statusCallback?.(`展开菜单... (已展开 ${expanded + i + 1} 个)`);
-
-      $(menu).trigger('click');
-      await waitForDOMStable(800);
-    }
-
-    expanded += collapsedMenus.length;
-  }
-
-  statusCallback?.(`所有菜单已展开 (共 ${expanded} 个)`);
-  console.log(`[保存资源] 所有菜单已展开 (共 ${expanded} 个)`);
-}
-
-/**
- * 获取所有学习资源项
- */
-function getAllResourceItems(): Array<{
-  element: HTMLElement;
-  type: 'video' | 'document' | 'unknown';
-  title: string;
-}> {
-  const items: Array<{
-    element: HTMLElement;
-    type: 'video' | 'document' | 'unknown';
-    title: string;
-  }> = [];
-
-  $('.full-screen-mode-sidebar-menu-item').each((_, item) => {
-    const $item = $(item);
-    const icon = $item.find('i.activity-type-icon');
-    const titleElement = $item.find('.text-too-long');
-    const title = titleElement.text().trim();
-
-    let type: 'video' | 'document' | 'unknown' = 'unknown';
-    if (icon.hasClass('font-syllabus-online-video')) {
-      type = 'video';
-    } else if (icon.hasClass('font-syllabus-page')) {
-      type = 'document';
-    }
-
-    if (type !== 'unknown') {
-      items.push({
-        element: item,
-        type,
-        title,
-      });
-    }
-  });
-
-  return items;
-}
+// ============================================================
+// 文件名 / 下载辅助
+// ============================================================
 
 /**
  * 获取当前页面的文件名
@@ -127,9 +27,6 @@ function getCurrentFileName(): string {
 
 /**
  * 下载文件并保存
- * @param url 下载地址
- * @param filename 文件名（可能不包含扩展名）
- * @param ensureExtension 是否需要从响应头确保扩展名
  */
 async function downloadFile(url: string, filename: string, ensureExtension = false): Promise<void> {
   const response = await fetch(url);
@@ -193,7 +90,6 @@ function getVideoExtension(videoSrc: string, videoElement: HTMLVideoElement): st
 
   if (urlParts.length > 1) {
     const ext = urlParts[urlParts.length - 1].toLowerCase();
-    // 验证是否是常见的视频扩展名
     const validExtensions = ['mp4', 'webm', 'ogg', 'mov', 'avi', 'flv', 'mkv', 'm3u8'];
     if (validExtensions.includes(ext)) {
       return ext;
@@ -212,6 +108,10 @@ function getVideoExtension(videoSrc: string, videoElement: HTMLVideoElement): st
   // 默认返回 mp4
   return 'mp4';
 }
+
+// ============================================================
+// 视频保存
+// ============================================================
 
 /**
  * 保存视频资源
@@ -232,21 +132,17 @@ async function saveVideoResource(title: string, statusCallback?: (message: strin
   const videoSrc = videoElement.src;
   const fullUrl = videoSrc.startsWith('http') ? videoSrc : `${window.location.origin}${videoSrc}`;
 
-  // 获取文件名
   const fileName = getCurrentFileName();
 
-  // 尝试从 URL 获取扩展名
   const videoExtension = getVideoExtension(videoSrc, videoElement);
   const hasValidExtension = videoExtension !== 'mp4' || videoSrc.toLowerCase().includes('.mp4');
 
-  // 如果 URL 有有效的扩展名，直接使用；否则让 downloadFile 从响应头获取
   const fullFileName = hasValidExtension ? `${fileName}.${videoExtension}` : fileName;
 
   statusCallback?.(`正在下载视频: ${fileName}`);
   console.log(`[保存资源] 下载视频: ${fileName} - ${fullUrl}`);
 
   try {
-    // 如果文件名没有扩展名，让 downloadFile 从 Content-Type 获取
     await downloadFile(fullUrl, fullFileName, !hasValidExtension);
     statusCallback?.(`✅ 已保存视频: ${fileName}`);
     return true;
@@ -256,6 +152,10 @@ async function saveVideoResource(title: string, statusCallback?: (message: strin
     return false;
   }
 }
+
+// ============================================================
+// 文档转 PDF 保存
+// ============================================================
 
 /**
  * 保存文档资源（转换为PDF）
@@ -273,7 +173,6 @@ async function saveDocumentResource(title: string, statusCallback?: (message: st
     return false;
   }
 
-  // 获取文件名
   const fileName = getCurrentFileName();
 
   statusCallback?.(`正在生成PDF: ${fileName}`);
@@ -284,7 +183,6 @@ async function saveDocumentResource(title: string, statusCallback?: (message: st
   await waitForDOMStable(1500);
 
   try {
-    // 检查预加载的库是否可用
     const jsPDF = (window as any).jspdf?.jsPDF;
     const html2canvas = (window as any).html2canvas;
 
@@ -303,7 +201,6 @@ async function saveDocumentResource(title: string, statusCallback?: (message: st
         return;
       }
 
-      // 如果图片是跨域的，需要重新加载带 crossorigin 的版本
       const isCrossOrigin = img.src.startsWith('http') && !img.src.startsWith(window.location.origin);
 
       if (isCrossOrigin && !img.crossOrigin) {
@@ -328,7 +225,6 @@ async function saveDocumentResource(title: string, statusCallback?: (message: st
     // 等待所有跨域图片处理完成
     if (imagePromises.length > 0) {
       await Promise.all(imagePromises);
-      // 等待一下让 DOM 更新
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
 
@@ -343,7 +239,6 @@ async function saveDocumentResource(title: string, statusCallback?: (message: st
       backgroundColor: '#ffffff',
       imageTimeout: 15000,
       onclone: (clonedDoc: Document) => {
-        // 在克隆的文档中，确保所有图片都有 crossorigin 属性
         const clonedImages = clonedDoc.querySelectorAll('img');
         clonedImages.forEach((img: HTMLImageElement) => {
           if (img.src.startsWith('http') && !img.src.startsWith(window.location.origin)) {
@@ -387,15 +282,15 @@ async function saveDocumentResource(title: string, statusCallback?: (message: st
   }
 }
 
+// ============================================================
+// 单项处理入口
+// ============================================================
+
 /**
  * 处理单个资源项
  */
-async function processResourceItem(
-  item: {
-    element: HTMLElement;
-    type: 'video' | 'document' | 'unknown';
-    title: string;
-  },
+export async function processResourceItem(
+  item: ResourceItem,
   statusCallback?: (message: string) => void,
 ): Promise<boolean> {
   console.log(`[保存资源] 处理资源: ${item.title} (${item.type})`);
@@ -415,76 +310,4 @@ async function processResourceItem(
   }
 
   return false;
-}
-
-/**
- * 启动保存所有资源的流程
- */
-export async function startSaveAllResources(): Promise<void> {
-  const statusElement = $('#save-all-status');
-  const button = $('#save-all-resources-btn');
-
-  // 更新状态显示
-  const updateStatus = (message: string, type: 'info' | 'success' | 'error' = 'info') => {
-    statusElement.show();
-    statusElement.removeClass('download-status-info download-status-success download-status-error');
-    statusElement.addClass(`download-status-${type}`);
-    statusElement.text(message);
-  };
-
-  try {
-    button.prop('disabled', true);
-    updateStatus('开始保存资源...');
-
-    // 步骤1: 展开所有树形菜单
-    console.log('[保存资源] 步骤1: 展开所有树形菜单');
-    await expandAllTrees(updateStatus);
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-
-    // 步骤2: 获取所有资源项
-    console.log('[保存资源] 步骤2: 获取所有资源项');
-    updateStatus('正在扫描资源项...');
-    const items = getAllResourceItems();
-    console.log(`[保存资源] 找到 ${items.length} 个资源项`, items);
-
-    if (items.length === 0) {
-      updateStatus('未找到可保存的资源', 'error');
-      button.prop('disabled', false);
-      return;
-    }
-
-    updateStatus(`找到 ${items.length} 个资源，开始保存...`);
-
-    // 步骤3: 逐个处理资源项
-    let successCount = 0;
-    let failCount = 0;
-
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i];
-      updateStatus(`[${i + 1}/${items.length}] 正在保存: ${item.title}`);
-
-      const success = await processResourceItem(item, (msg) => {
-        updateStatus(`[${i + 1}/${items.length}] ${msg}`);
-      });
-
-      if (success) {
-        successCount++;
-      } else {
-        failCount++;
-      }
-
-      // 等待一段时间再处理下一个资源
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-    }
-
-    // 完成
-    const summary = `保存完成！成功: ${successCount}, 失败: ${failCount}`;
-    console.log(`[保存资源] ${summary}`);
-    updateStatus(summary, successCount > 0 ? 'success' : 'error');
-  } catch (error) {
-    console.error('[保存资源] 执行出错:', error);
-    updateStatus(`执行出错: ${error}`, 'error');
-  } finally {
-    button.prop('disabled', false);
-  }
 }

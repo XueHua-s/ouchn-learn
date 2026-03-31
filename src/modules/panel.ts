@@ -2,7 +2,7 @@ import { makeDraggable } from '@/utils/helper';
 import { startAutoViewPages } from './auto-view';
 import { startAutoHangAll } from './auto-hang';
 import { startAutoMaterialDownload } from './auto-material-download';
-import { startSaveAllResources } from './auto-save-resources';
+import { startSaveAllResources } from './save-resources';
 import { DEFAULT_HANG_INTERVAL } from '@/constants';
 
 /**
@@ -25,53 +25,49 @@ export function createDownloadPanel(): void {
   }
 
   const panel = $(`
-    <div class="download-panel">
-      <div class="download-header">
-        <h3 class="download-title">📥 资源下载</h3>
-        <button class="download-toggle">−</button>
+    <div class="ouchn-panel download-panel">
+      <div class="ouchn-panel-header download-header">
+        <h3 class="ouchn-panel-title">资源下载</h3>
+        <button class="ouchn-panel-toggle">−</button>
       </div>
-      <div class="download-body">
-        <button class="download-btn download-btn-primary" id="auto-view-pages-btn">
-          👀 一键查看所有页面
+      <div class="ouchn-panel-body">
+        <button class="ouchn-btn ouchn-btn-primary" id="auto-view-pages-btn">
+          一键查看所有页面
         </button>
 
-        <div class="download-status download-status-info" id="auto-view-status" style="display:none;">
+        <div class="ouchn-status ouchn-status-info" id="auto-view-status" style="display:none;">
           准备开始...
         </div>
 
-        <hr style="margin: 15px 0; border: none; border-top: 1px solid #e0e0e0;">
+        <hr class="ouchn-divider">
 
-        <div style="margin: 10px 0;">
-          <label style="font-size: 12px; color: #666; display: flex; align-items: center; justify-content: space-between;">
-            <span>下载间隔(秒):</span>
-            <input type="number" id="material-download-interval" value="10" min="5" max="60"
-                   style="width: 80px; padding: 5px; border: 1px solid #ddd; border-radius: 4px; text-align: center;">
-          </label>
+        <div class="ouchn-input-row">
+          <label class="ouchn-label">下载间隔(秒)</label>
+          <input type="number" class="ouchn-input ouchn-input-sm" id="material-download-interval"
+                 value="10" min="5" max="60">
         </div>
 
-        <button class="download-btn download-btn-secondary" id="auto-download-materials-btn">
-          📥 批量下载参考资料
+        <button class="ouchn-btn ouchn-btn-secondary" id="auto-download-materials-btn">
+          批量下载参考资料
         </button>
 
-        <div class="download-status download-status-info" id="auto-download-status" style="display:none;">
+        <div class="ouchn-status ouchn-status-info" id="auto-download-status" style="display:none;">
           准备开始...
         </div>
 
-        <hr style="margin: 15px 0; border: none; border-top: 1px solid #e0e0e0;">
+        <hr class="ouchn-divider">
 
-        <div style="margin: 10px 0;">
-          <label style="font-size: 12px; color: #666; display: flex; align-items: center; justify-content: space-between;">
-            <span>挂机间隔(秒):</span>
-            <input type="number" id="auto-hang-interval" value="${DEFAULT_HANG_INTERVAL}" min="10" max="300"
-                   style="width: 80px; padding: 5px; border: 1px solid #ddd; border-radius: 4px; text-align: center;">
-          </label>
+        <div class="ouchn-input-row">
+          <label class="ouchn-label">挂机间隔(秒)</label>
+          <input type="number" class="ouchn-input ouchn-input-sm" id="auto-hang-interval"
+                 value="${DEFAULT_HANG_INTERVAL}" min="10" max="300">
         </div>
 
-        <button class="download-btn download-btn-success" id="auto-hang-all-btn">
-          🎬 一键全部挂机
+        <button class="ouchn-btn ouchn-btn-success" id="auto-hang-all-btn">
+          一键全部挂机
         </button>
 
-        <div class="download-status download-status-info" id="auto-hang-status" style="display:none;">
+        <div class="ouchn-status ouchn-status-info" id="auto-hang-status" style="display:none;">
           准备开始...
         </div>
       </div>
@@ -81,8 +77,8 @@ export function createDownloadPanel(): void {
   $('body').append(panel);
 
   // 绑定折叠事件
-  panel.find('.download-toggle').on('click', function () {
-    const body = panel.find('.download-body');
+  panel.find('.ouchn-panel-toggle').on('click', function () {
+    const body = panel.find('.ouchn-panel-body');
     body.toggleClass('collapsed');
     $(this).text(body.hasClass('collapsed') ? '+' : '−');
   });
@@ -101,17 +97,17 @@ export function createDownloadPanel(): void {
  */
 function createFullScreenPanel(): void {
   const panel = $(`
-    <div class="download-panel">
-      <div class="download-header">
-        <h3 class="download-title">📥 资源下载</h3>
-        <button class="download-toggle">−</button>
+    <div class="ouchn-panel download-panel">
+      <div class="ouchn-panel-header download-header">
+        <h3 class="ouchn-panel-title">资源下载</h3>
+        <button class="ouchn-panel-toggle">−</button>
       </div>
-      <div class="download-body">
-        <button class="download-btn download-btn-primary" id="save-all-resources-btn">
-          💾 保存所有学习资源
+      <div class="ouchn-panel-body">
+        <button class="ouchn-btn ouchn-btn-primary" id="save-all-resources-btn">
+          保存所有学习资源
         </button>
 
-        <div class="download-status download-status-info" id="save-all-status" style="display:none;">
+        <div class="ouchn-status ouchn-status-info" id="save-all-status" style="display:none;">
           准备开始...
         </div>
       </div>
@@ -121,8 +117,8 @@ function createFullScreenPanel(): void {
   $('body').append(panel);
 
   // 绑定折叠事件
-  panel.find('.download-toggle').on('click', function () {
-    const body = panel.find('.download-body');
+  panel.find('.ouchn-panel-toggle').on('click', function () {
+    const body = panel.find('.ouchn-panel-body');
     body.toggleClass('collapsed');
     $(this).text(body.hasClass('collapsed') ? '+' : '−');
   });

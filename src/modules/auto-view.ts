@@ -12,8 +12,8 @@ export function updateAutoViewStatus(message: string, type: 'info' | 'success' |
   statusEl
     .show()
     .text(message)
-    .removeClass('download-status-info download-status-success download-status-warning')
-    .addClass(`download-status-${type}`);
+    .removeClass('ouchn-status-info ouchn-status-success ouchn-status-warning')
+    .addClass(`ouchn-status-${type}`);
   console.log(`[自动查看页面] ${message}`);
 }
 
@@ -74,7 +74,7 @@ export async function startAutoViewPages(): Promise<void> {
   }
 
   isAutoViewing = true;
-  $('#auto-view-pages-btn').text('⏸️ 停止查看').css('background', 'linear-gradient(135deg, #ee0979 0%, #ff6a00 100%)');
+  $('#auto-view-pages-btn').text('停止查看').removeClass('ouchn-btn-primary').addClass('ouchn-btn-warning');
 
   // 检查并展开所有章节
   updateAutoViewStatus('检查课程章节状态...', 'info');
@@ -148,9 +148,7 @@ export async function processNextPageWithState(): Promise<void> {
  */
 export function stopAutoViewing(): void {
   isAutoViewing = false;
-  $('#auto-view-pages-btn')
-    .text('👀 一键查看所有页面')
-    .css('background', 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)');
+  $('#auto-view-pages-btn').text('一键查看所有页面').removeClass('ouchn-btn-warning').addClass('ouchn-btn-primary');
 }
 
 /**
@@ -171,9 +169,7 @@ export async function checkAndResumeAutoView(): Promise<void> {
     console.log('[自动查看页面] 检测到返回目标页面，继续执行...');
 
     isAutoViewing = true;
-    $('#auto-view-pages-btn')
-      .text('⏸️ 停止查看')
-      .css('background', 'linear-gradient(135deg, #ee0979 0%, #ff6a00 100%)');
+    $('#auto-view-pages-btn').text('停止查看').removeClass('ouchn-btn-primary').addClass('ouchn-btn-warning');
 
     updateAutoViewStatus(`继续自动查看 (已处理 ${state.processedCount || 0} 个)...`, 'info');
 

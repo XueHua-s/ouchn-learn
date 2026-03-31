@@ -2,7 +2,7 @@ import { injectStyles } from './modules/styles';
 import { createDownloadPanel } from './modules/panel';
 import { checkAndResumeAutoView } from './modules/auto-view';
 import { initLegacyHangEvents, startAutoButtonScanning } from './modules/legacy-hang';
-import { initAutoExam, isExamPage } from './modules/auto-exam';
+import { initAutoExam, isExamPage } from './modules/exam/exam-panel';
 
 /**
  * 主入口函数

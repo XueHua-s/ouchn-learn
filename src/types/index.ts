@@ -50,3 +50,9 @@ export interface MaterialAttachment {
 export interface CourseConfig {
   coursePrefix: string;
 }
+
+export interface ResourceItem {
+  element: HTMLElement;
+  type: 'video' | 'document' | 'unknown';
+  title: string;
+}

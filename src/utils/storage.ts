@@ -1,5 +1,6 @@
-import { STORAGE_KEY, RETURN_URL_KEY, COURSE_CONFIG_KEY, MATERIAL_CACHE_KEY } from '@/constants';
+import { STORAGE_KEY, RETURN_URL_KEY, COURSE_CONFIG_KEY, MATERIAL_CACHE_KEY, EXAM_CONFIG_KEY } from '@/constants';
 import type { ViewState, CourseConfig, MaterialAttachment } from '@/types';
+import type { ExamConfig } from '@/types/exam';
 
 /**
  * 保存查看状态到 localStorage
@@ -112,4 +113,40 @@ export function clearMaterialCache(): void {
   } catch (e) {
     console.error('[资料缓存] 清除失败:', e);
   }
+}
+
+/**
+ * 保存 AI 答题配置
+ */
+export function saveExamConfig(config: ExamConfig): void {
+  try {
+    localStorage.setItem(EXAM_CONFIG_KEY, JSON.stringify(config));
+  } catch (e) {
+    console.error('[AI答题] 保存配置失败:', e);
+  }
+}
+
+/**
+ * 获取 AI 答题配置
+ */
+export function getExamConfig(): ExamConfig {
+  try {
+    const stored = localStorage.getItem(EXAM_CONFIG_KEY);
+    if (stored) {
+      const config = JSON.parse(stored);
+      if (!config.provider) {
+        config.provider = 'openai';
+      }
+      return config;
+    }
+  } catch (e) {
+    console.error('[AI答题] 读取配置失败:', e);
+  }
+  return {
+    provider: 'openai',
+    modelName: 'gpt-4.1',
+    apiKey: '',
+    apiBaseUrl: 'https://api.openai.com/v1',
+    customPrompt: '',
+  };
 }

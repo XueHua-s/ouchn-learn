@@ -14,8 +14,8 @@ export function updateAutoHangStatus(message: string, type: 'info' | 'success' |
   statusEl
     .show()
     .text(message)
-    .removeClass('download-status-info download-status-success download-status-warning')
-    .addClass(`download-status-${type}`);
+    .removeClass('ouchn-status-info ouchn-status-success ouchn-status-warning')
+    .addClass(`ouchn-status-${type}`);
   console.log(`[一键挂机] ${message}`);
 }
 
@@ -70,7 +70,7 @@ export async function startAutoHangAll(): Promise<void> {
   }
 
   isAutoHanging = true;
-  $('#auto-hang-all-btn').text('⏸️ 停止挂机').css('background', 'linear-gradient(135deg, #ee0979 0%, #ff6a00 100%)');
+  $('#auto-hang-all-btn').text('停止挂机').removeClass('ouchn-btn-success').addClass('ouchn-btn-warning');
 
   // 检查并展开所有章节
   updateAutoHangStatus('检查课程章节状态...', 'info');
@@ -128,9 +128,7 @@ export function processNextHang(): void {
  */
 export function stopAutoHanging(): void {
   isAutoHanging = false;
-  $('#auto-hang-all-btn')
-    .text('🎬 一键全部挂机')
-    .css('background', 'linear-gradient(135deg, #11998e 0%, #38ef7d 100%)');
+  $('#auto-hang-all-btn').text('一键全部挂机').removeClass('ouchn-btn-warning').addClass('ouchn-btn-success');
 }
 
 /**

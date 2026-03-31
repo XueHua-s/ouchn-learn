@@ -173,10 +173,8 @@ export async function startAutoMaterialDownload(): Promise<void> {
 
   function updateStatus(msg: string, type: string): void {
     statusElement.text(msg);
-    statusElement.removeClass(
-      'download-status-info download-status-success download-status-error download-status-warning',
-    );
-    statusElement.addClass(`download-status-${type}`);
+    statusElement.removeClass('ouchn-status-info ouchn-status-success ouchn-status-warning');
+    statusElement.addClass(`ouchn-status-${type}`);
     statusElement.show();
     console.log(`[批量下载] ${msg}`);
   }
@@ -242,7 +240,7 @@ export async function startAutoMaterialDownload(): Promise<void> {
     console.log(`[批量下载] ========== 全部完成，共下载 ${allFiles.length} 个文件 ==========`);
   } catch (error) {
     console.error('[批量下载] 执行失败:', error);
-    updateStatus(`❌ 执行失败: ${error}`, 'error');
+    updateStatus(`执行失败: ${error}`, 'warning');
   } finally {
     btn.prop('disabled', false);
   }
