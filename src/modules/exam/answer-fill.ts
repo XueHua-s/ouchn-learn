@@ -5,7 +5,8 @@
 import type { QuestionType, Question, AIResponse, ExamStats } from '@/types/exam';
 import { log, warn, isValidAnswer } from '@/types/exam';
 import { findSubjectElement } from './question-extract';
-import { fillEditable, fillTextarea, writeWithVerify, waitForEditor, triggerAngularUpdate } from './answer-write';
+import { fillEditable, fillTextarea, writeWithVerify, waitForEditor } from './answer-write';
+import { fillMatchingQuestion } from './answer-match';
 
 /**
  * 在 subject 元素中查找作答编辑器（排除题目描述中的 contenteditable）
@@ -207,90 +208,7 @@ async function fillEssayQuestion(subjectEl: Element, question: Question, answer:
   return true;
 }
 
-/**
- * 填写匹配题
- */
-async function fillMatchingQuestion(
-  subjectEl: Element,
-  question: Question,
-  answer: string | string[],
-): Promise<boolean> {
-  // 解析 AI 返回的匹配关系
-  let matchMap: Record<string, string> = {};
-
-  if (typeof answer === 'string') {
-    try {
-      matchMap = JSON.parse(answer);
-    } catch {
-      // 尝试解析 "① → A, ② → B" 格式
-      answer.split(/[,，;\n]+/).forEach((pair) => {
-        const parts = pair.split(/\s*[-=→>:：]\s*/);
-        if (parts.length >= 2) matchMap[parts[0].trim()] = parts[1].trim();
-      });
-    }
-  } else if (Array.isArray(answer)) {
-    const stems = question.matchingItems || [];
-    answer.forEach((val, idx) => {
-      const key = stems[idx]?.stem?.match(/[①②③④⑤⑥⑦⑧⑨⑩]/)?.[0] || String(idx + 1);
-      matchMap[key] = String(val);
-    });
-  }
-
-  if (Object.keys(matchMap).length === 0) {
-    warn(`题目 ${question.index}: 无法解析匹配题答案`);
-    return false;
-  }
-
-  log(`题目 ${question.index}: 匹配答案`, matchMap);
-
-  // 策略 1：AngularJS scope 直接操作
-  let filled = 0;
-  try {
-    const ng = (window as any).angular;
-    if (ng) {
-      const scope = ng.element(subjectEl).scope();
-      if (scope) {
-        // 搜索 scope 上的 answer/answers/matchAnswer 对象
-        const ansObj = scope.answer || scope.answers || scope.matchAnswer || scope.matching;
-        if (ansObj && typeof ansObj === 'object') {
-          Object.entries(matchMap).forEach(([key, value]) => {
-            ansObj[key] = value;
-            filled++;
-          });
-          scope.$apply?.();
-          if (filled > 0) {
-            log(`题目 ${question.index}: 通过 AngularJS scope 填入 ${filled} 项`);
-            return true;
-          }
-        }
-      }
-    }
-  } catch {
-    // 继续 fallback
-  }
-
-  // 策略 2：查找 drop target / slot，写入 textContent
-  const dropTargets = subjectEl.querySelectorAll(
-    '.match-target, .drop-zone, [dnd-list], .matching-answer-slot, .match-answer',
-  );
-  for (const [key, value] of Object.entries(matchMap)) {
-    const target = Array.from(dropTargets).find(
-      (el) => el.closest(`[data-index="${key}"]`) !== null || el.parentElement?.textContent?.includes(key),
-    ) as HTMLElement | undefined;
-    if (target) {
-      target.textContent = value;
-      triggerAngularUpdate(target, value);
-      filled++;
-    }
-  }
-
-  if (filled > 0) {
-    log(`题目 ${question.index}: 通过 DOM 写入填入 ${filled} 项`);
-  } else {
-    warn(`题目 ${question.index}: 匹配题填写失败，未找到可操作的 DOM 目标`);
-  }
-  return filled > 0;
-}
+// fillMatchingQuestion 已提取到 answer-match.ts
 
 /**
  * 对单道题填写答案
