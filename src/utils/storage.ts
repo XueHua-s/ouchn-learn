@@ -134,9 +134,8 @@ export function getExamConfig(): ExamConfig {
     const stored = localStorage.getItem(EXAM_CONFIG_KEY);
     if (stored) {
       const config = JSON.parse(stored);
-      if (!config.provider) {
-        config.provider = 'openai';
-      }
+      if (!config.provider) config.provider = 'openai';
+      if (!config.concurrency || config.concurrency < 1) config.concurrency = 3;
       return config;
     }
   } catch (e) {
@@ -148,5 +147,6 @@ export function getExamConfig(): ExamConfig {
     apiKey: '',
     apiBaseUrl: 'https://api.openai.com/v1',
     customPrompt: '',
+    concurrency: 3,
   };
 }

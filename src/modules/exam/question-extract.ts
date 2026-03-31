@@ -106,11 +106,19 @@ export function extractQuestions(): Question[] {
       index = match ? parseInt(match[1]) : 0;
     }
 
-    // 如果序号为 0 且没有题目描述，可能是非题目元素（如章节标题、分隔符），跳过
+    // 获取题目描述和分数
     const descEl = element.querySelector('.subject-description');
     const description = descEl?.textContent?.trim() || '';
-    if (index === 0 && !description && type === 'unknown') {
-      return;
+    const scoreEl = element.querySelector('.summary-sub-title');
+    const hasScore = scoreEl && /\d+\s*分/.test(scoreEl.textContent || '');
+
+    // FIXED: 过滤非题目元素（章节标题、分隔符等）
+    // 条件：无法解析题号 + 无分数信息 + (无描述 或 type=unknown)
+    // 日志中表现为 description 极短 (≤10字符)、type=unknown、scoreText 为空
+    if (index === 0 && !hasScore) {
+      if (!description || type === 'unknown') {
+        return;
+      }
     }
 
     // index=0 说明 DOM 解析不到题号，用 1-based 遍历序号兜底
@@ -119,8 +127,6 @@ export function extractQuestions(): Question[] {
       index = fallbackIndex;
     }
 
-    // 获取分数文字
-    const scoreEl = element.querySelector('.summary-sub-title');
     const scoreText = scoreEl?.textContent?.trim() || '';
 
     // 获取章节标题

@@ -16,6 +16,7 @@ export interface ExamConfig {
   apiKey: string;
   apiBaseUrl: string;
   customPrompt: string;
+  concurrency: number;
 }
 
 export interface QuestionImage {

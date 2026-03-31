@@ -82,8 +82,10 @@ async function startAutoExam(config: ExamConfig): Promise<void> {
 
     showStatus(`已提取 ${questions.length} 道题目，正在调用 AI 分析...`, 'info');
 
-    // 调用 AI
-    const aiResponse = await callProvider(config, questions, stats);
+    // 逐题并发调用 AI
+    const aiResponse = await callProvider(config, questions, stats, (done, total) => {
+      showStatus(`AI 答题中... ${done}/${total}`, 'info');
+    });
     stats.aiReturnedCount = aiResponse.questions?.length || 0;
 
     log('AI 返回的答案:', aiResponse);
@@ -132,6 +134,7 @@ function getConfigFromPanel(): ExamConfig {
     apiKey: ($(`#ai-api-key-${provider}`) as any).val() || '',
     apiBaseUrl: ($(`#ai-base-url-${provider}`) as any).val() || '',
     customPrompt: ($('#ai-custom-prompt') as any).val() || '',
+    concurrency: parseInt(($('#ai-concurrency') as any).val(), 10) || 3,
   };
 }
 
@@ -216,6 +219,12 @@ function createAIExamPanel(): void {
           <label class="ouchn-label">自定义提示词 (可选)</label>
           <textarea class="ouchn-textarea" id="ai-custom-prompt" rows="3"
                     placeholder="例如: 这是C语言考试...">${config.customPrompt}</textarea>
+        </div>
+
+        <div class="ouchn-input-row">
+          <label class="ouchn-label">答题并发数</label>
+          <input type="number" class="ouchn-input ouchn-input-sm" id="ai-concurrency"
+                 value="${config.concurrency || 3}" min="1" max="20">
         </div>
 
         <button class="ouchn-btn ouchn-btn-primary" id="start-ai-exam">开始 AI 答题</button>
