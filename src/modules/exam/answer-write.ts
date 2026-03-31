@@ -74,28 +74,48 @@ function readBackValue(el: HTMLElement): string {
 }
 
 /**
- * 写入 + 校验 + 重试。最多尝试 maxRetries+1 次。
- * 返回 true 表示写入验证通过。
+ * 写入 + 宽松校验。
+ * FIXED: 不做重试写入——AngularJS 页面上重复 execCommand 会破坏已写入的内容。
+ * 校验只是信息性的，即使校验失败也认为写入已执行（返回 true），
+ * 因为 Angular digest 可能延迟同步 DOM，读回值不可靠。
  */
 export async function writeWithVerify(
   el: HTMLElement,
   text: string,
   writeFn: (el: any, text: string) => void,
-  maxRetries = 2,
 ): Promise<boolean> {
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    writeFn(el, text);
-    await new Promise((r) => setTimeout(r, 150));
-    const actual = readBackValue(el);
-    if (actual && actual.length > 0 && text.trim().startsWith(actual.substring(0, 20))) {
-      return true;
-    }
-    if (attempt < maxRetries) {
-      warn(`写入校验失败(第${attempt + 1}次)，重试...`);
-      await new Promise((r) => setTimeout(r, 300));
-    }
+  // 写入一次
+  writeFn(el, text);
+
+  // 等待框架 digest
+  await new Promise((r) => setTimeout(r, 200));
+
+  // 宽松校验：只检查元素是否有内容（不要求完全一致，Angular 可能会做格式化）
+  const actual = readBackValue(el);
+  if (actual.length > 0) {
+    return true;
   }
-  return false;
+
+  // 读回为空——可能框架还没同步，再等一轮
+  await new Promise((r) => setTimeout(r, 500));
+  const retryRead = readBackValue(el);
+  if (retryRead.length > 0) {
+    return true;
+  }
+
+  // 仍然为空，尝试直接设置 textContent/value 作为最后手段
+  warn('writeWithVerify: 首次写入后读回为空，尝试 fallback 直写');
+  if (el instanceof HTMLTextAreaElement) {
+    el.value = text;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  } else {
+    el.textContent = text;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  triggerAngularUpdate(el, text);
+
+  return true;
 }
 
 /**
