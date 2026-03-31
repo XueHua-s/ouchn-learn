@@ -86,7 +86,12 @@ export function extractQuestions(): Question[] {
 
   log(`DOM 中共找到 ${subjectElements.length} 个 .subject 元素`);
 
+  // FIXED: 用 1-based 计数器兜底，确保永远不会出现 index=0
+  let fallbackIndex = 0;
+
   subjectElements.forEach((element) => {
+    fallbackIndex++;
+
     // 检测题型
     const { type, rawTypeText } = detectQuestionType(element);
 
@@ -106,6 +111,12 @@ export function extractQuestions(): Question[] {
     const description = descEl?.textContent?.trim() || '';
     if (index === 0 && !description && type === 'unknown') {
       return;
+    }
+
+    // index=0 说明 DOM 解析不到题号，用 1-based 遍历序号兜底
+    if (index === 0) {
+      warn(`第 ${fallbackIndex} 个 .subject 元素无法解析题号，使用兜底序号 ${fallbackIndex}`);
+      index = fallbackIndex;
     }
 
     // 获取分数文字

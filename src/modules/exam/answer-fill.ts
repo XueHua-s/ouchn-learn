@@ -362,11 +362,24 @@ export function fillAnswers(questions: Question[], aiResponse: AIResponse, stats
     answerMap.set(a.index, a.answer);
   });
 
+  // 完整性检查
+  const aiIndexes = Array.from(answerMap.keys()).sort((a, b) => a - b);
+  const localIndexes = questions.map((q) => q.index).sort((a, b) => a - b);
+  if (aiResponse.questions.length !== questions.length) {
+    warn(
+      `AI 返回题数(${aiResponse.questions.length}) ≠ 本地题数(${questions.length})`,
+      '| AI indexes:',
+      aiIndexes.join(','),
+      '| 本地 indexes:',
+      localIndexes.join(','),
+    );
+  }
+
   questions.forEach((question) => {
     const answer = answerMap.get(question.index);
     if (answer === undefined || answer === null) {
       stats.skippedQuestions.push(question.index);
-      warn(`题目 ${question.index}: AI 未返回答案，跳过`);
+      warn(`题目 ${question.index}: AI 未返回答案，跳过`, '| AI 返回的 index 列表:', aiIndexes.join(','));
       return;
     }
 
