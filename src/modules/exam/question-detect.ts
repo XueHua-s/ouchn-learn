@@ -100,6 +100,46 @@ export function extractQuestionImages(element: Element): QuestionImage[] {
 }
 
 /**
+ * 将 canvas 导出为安全的 base64（避免 webp 格式被 API 拒绝）
+ * FIXED: Chrome 对 webp 源图 canvas.toDataURL('image/jpeg') 可能仍返回 webp，
+ *        导致 OpenAI API 报 "fail to decode image config(webp)" 500 错误。
+ *        策略：优先 jpeg，若返回非 jpeg 则回退 png（浏览器必须支持 png）。
+ */
+function canvasToSafeBase64(canvas: HTMLCanvasElement, quality = 0.85): string {
+  const jpeg = canvas.toDataURL('image/jpeg', quality);
+  if (jpeg.startsWith('data:image/jpeg')) {
+    return jpeg;
+  }
+  // 浏览器未能按要求导出 jpeg，回退 png
+  return canvas.toDataURL('image/png');
+}
+
+/**
+ * 将 webp 等不安全格式的 data URI 通过 canvas 重编码为 jpeg/png
+ */
+async function convertDataUriViaCanvas(dataUri: string): Promise<string | null> {
+  try {
+    const img = new Image();
+    const loaded = await new Promise<boolean>((resolve) => {
+      img.onload = () => resolve(true);
+      img.onerror = () => resolve(false);
+      img.src = dataUri;
+      setTimeout(() => resolve(false), 3000);
+    });
+    if (!loaded) return dataUri; // 转换失败则原样返回
+    const canvas = document.createElement('canvas');
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return dataUri;
+    ctx.drawImage(img, 0, 0);
+    return canvasToSafeBase64(canvas);
+  } catch {
+    return dataUri;
+  }
+}
+
+/**
  * 对题目区域进行 canvas 截图，返回 base64
  */
 async function captureQuestionImage(element: Element): Promise<string | null> {
@@ -117,7 +157,7 @@ async function captureQuestionImage(element: Element): Promise<string | null> {
       logging: false,
     });
 
-    return canvas.toDataURL('image/jpeg', 0.8);
+    return canvasToSafeBase64(canvas, 0.8);
   } catch (e) {
     warn('截图失败:', e);
     return null;
@@ -134,6 +174,10 @@ export async function resolveImageBase64(image: QuestionImage, questionElement: 
 
   // 已经是 base64
   if (src.startsWith('data:image/')) {
+    // FIXED: webp 格式可能被 OpenAI API 拒绝，需要通过 canvas 转换为 jpeg/png
+    if (src.startsWith('data:image/webp')) {
+      return convertDataUriViaCanvas(src);
+    }
     return src;
   }
 
@@ -163,7 +207,7 @@ export async function resolveImageBase64(image: QuestionImage, questionElement: 
         const ctx = canvas.getContext('2d');
         if (ctx) {
           ctx.drawImage(img, 0, 0);
-          return canvas.toDataURL('image/jpeg', 0.85);
+          return canvasToSafeBase64(canvas, 0.85);
         }
       }
     } catch {
