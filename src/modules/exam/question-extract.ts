@@ -3,8 +3,48 @@
  */
 
 import type { Question } from '@/types/exam';
-import { IMAGE_HINT_KEYWORDS, log, warn } from '@/types/exam';
+import { IMAGE_HINT_KEYWORDS, SUB_INDEX_MULTIPLIER, log, warn } from '@/types/exam';
 import { detectQuestionType, extractQuestionImages } from './question-detect';
+import {
+  ANALYSIS_PARENT_CLASS,
+  BLANK_ANSWER_SELECTOR,
+  BLANK_IN_DESCRIPTION_SELECTOR,
+  OPTION_SELECTOR,
+  SUBJECT_DESCRIPTION_SELECTOR,
+  SUBJECT_INDEX_SELECTORS,
+  SUBJECT_SELECTOR,
+  SUB_SUBJECT_SELECTOR,
+} from './selectors';
+
+/**
+ * 综合题父材料截断长度。
+ * FIXED: 综合题展开为 N 个子题后，每个子题都把父题阅读材料拼到 description 里发给 AI；
+ *        对 2000 字阅读材料 + 5 子题，token 消耗 = 阅读材料 × 5 ≈ 10K，成本与延迟都被放大 5x。
+ *        截断到 800 字可保留主要语义同时控制成本。如需完整材料，可调高此值或改 batch 模式。
+ */
+const PARENT_DESCRIPTION_MAX_LEN = 800;
+
+/** 顶层题号显示字符串 */
+function buildTopDisplayIndex(index: number): string {
+  return String(index);
+}
+
+/** 子题号显示字符串：父-子，例如 "21.3" */
+function buildSubDisplayIndex(parentIndex: number, subIndex: number): string {
+  return `${parentIndex}.${subIndex}`;
+}
+
+/**
+ * 子题 index 整数编码。
+ * FIXED: 旧实现 `Number("21.03")` 会让 AI 返回 "21.3" 时 answerMap 匹配失败，
+ *        且无法支持 100+ 子题。新方案用整数 `parent*1000 + sub`，全链路稳定。
+ */
+function buildSubQuestionIndex(parentIndex: number, subIndex: number): number {
+  if (subIndex >= SUB_INDEX_MULTIPLIER) {
+    warn(`子题号 ${subIndex} 超过 SUB_INDEX_MULTIPLIER=${SUB_INDEX_MULTIPLIER}，编码可能与其他题号冲突`);
+  }
+  return parentIndex * SUB_INDEX_MULTIPLIER + subIndex;
+}
 
 /**
  * 等待题目数量稳定
@@ -15,7 +55,7 @@ export async function waitForQuestionsStable(timeout = 8000): Promise<number> {
   let stableTimes = 0;
 
   while (Date.now() - start < timeout) {
-    const count = document.querySelectorAll('.subject').length;
+    const count = document.querySelectorAll(SUBJECT_SELECTOR).length;
     if (count > 0 && count === lastCount) {
       stableTimes++;
       if (stableTimes >= 3) {
@@ -29,7 +69,7 @@ export async function waitForQuestionsStable(timeout = 8000): Promise<number> {
     await new Promise((r) => setTimeout(r, 500));
   }
 
-  const finalCount = document.querySelectorAll('.subject').length;
+  const finalCount = document.querySelectorAll(SUBJECT_SELECTOR).length;
   warn(`等待题目稳定超时，当前数量: ${finalCount}`);
   return finalCount;
 }
@@ -65,16 +105,129 @@ function getCurrentSectionTitle(element: Element): string {
  * 根据题号找到对应的 .subject DOM 元素
  */
 export function findSubjectElement(index: number): Element | null {
-  const subjectElements = document.querySelectorAll('.subject');
-  return (
-    Array.from(subjectElements).find((el) => {
-      const indexEl =
-        el.querySelector('.subject-resort-index .ng-binding') || el.querySelector('.subject-resort-index');
-      if (!indexEl) return false;
-      const match = indexEl.textContent?.match(/(\d+)/);
-      return match && parseInt(match[1]) === index;
-    }) || null
-  );
+  const subjectElements = document.querySelectorAll(SUBJECT_SELECTOR);
+  return Array.from(subjectElements).find((el) => parseQuestionIndex(el) === index) || null;
+}
+
+/**
+ * 根据 Question 信息找到实际可作答 DOM。
+ * FIXED: OUCHN 的综合题把可作答小题放在 `.sub-subject` 里，顶层 `.subject`
+ *        只是阅读材料容器。只按顶层题号定位会把 21/22/23 当成简答题，导致 radio
+ *        小题全部无法填写；这里用 parentIndex + subIndex 重新落到真实小题节点。
+ */
+export function findQuestionElement(question: Pick<Question, 'index' | 'parentIndex' | 'subIndex'>): Element | null {
+  if (isSubQuestion(question)) {
+    const parentEl = findSubjectElement(question.parentIndex);
+    if (!parentEl) return null;
+
+    const subSubjectElements = Array.from(parentEl.querySelectorAll(SUB_SUBJECT_SELECTOR));
+    const matched = subSubjectElements.find((subEl, idx) => {
+      const parsedIndex = parseQuestionIndex(subEl);
+      return parsedIndex === question.subIndex || (parsedIndex === 0 && idx + 1 === question.subIndex);
+    });
+
+    return matched || subSubjectElements[question.subIndex - 1] || null;
+  }
+
+  return findSubjectElement(question.index);
+}
+
+/**
+ * 类型守卫：当前 Question 是否是综合题展开后的子题。
+ * FIXED: 比 `parentIndex !== undefined && subIndex !== undefined` 更显式，
+ *        且使 TS 自动 narrow，下游可直接读 question.parentIndex 不用断言。
+ */
+function isSubQuestion(
+  question: Pick<Question, 'index' | 'parentIndex' | 'subIndex'>,
+): question is Pick<Question, 'index'> & { parentIndex: number; subIndex: number } {
+  return question.parentIndex !== undefined && question.subIndex !== undefined;
+}
+
+function parseQuestionIndex(element: Element): number {
+  let indexEl: Element | null = null;
+  for (const sel of SUBJECT_INDEX_SELECTORS) {
+    indexEl = element.querySelector(sel);
+    if (indexEl) break;
+  }
+  if (!indexEl) return 0;
+
+  const match = indexEl.textContent?.match(/(\d+)/);
+  return match ? parseInt(match[1], 10) : 0;
+}
+
+function hasAnalysisSubQuestions(element: Element): boolean {
+  return element.classList.contains(ANALYSIS_PARENT_CLASS) && element.querySelectorAll(SUB_SUBJECT_SELECTOR).length > 0;
+}
+
+function extractChoiceOptions(element: Element): NonNullable<Question['options']> {
+  const options: NonNullable<Question['options']> = [];
+  const optionElements = element.querySelectorAll(OPTION_SELECTOR);
+
+  optionElements.forEach((optEl) => {
+    const label = optEl.querySelector('.option-index')?.textContent?.trim() || '';
+    const content = optEl.querySelector('.option-content')?.textContent?.trim() || '';
+    const input = optEl.querySelector('input') as HTMLInputElement;
+    const value = input?.getAttribute('ng-value') || input?.value || '';
+
+    options.push({ label, content, value });
+  });
+
+  return options;
+}
+
+function extractAnalysisSubQuestions(parentElement: Element, parentIndex: number, sectionTitle: string): Question[] {
+  const parentDescEl = parentElement.querySelector(SUBJECT_DESCRIPTION_SELECTOR);
+  const rawParentDescription = parentDescEl?.textContent?.trim() || '';
+  // FIXED: 综合题展开后每个子题都拼接父材料 → token 浪费 N 倍，截断到 PARENT_DESCRIPTION_MAX_LEN。
+  const parentDescription =
+    rawParentDescription.length > PARENT_DESCRIPTION_MAX_LEN
+      ? rawParentDescription.substring(0, PARENT_DESCRIPTION_MAX_LEN) + '…[材料截断]'
+      : rawParentDescription;
+  const subSubjectElements = Array.from(parentElement.querySelectorAll(SUB_SUBJECT_SELECTOR));
+
+  return subSubjectElements.map((subElement, idx) => {
+    const parsedSubIndex = parseQuestionIndex(subElement);
+    const subIndex = parsedSubIndex || idx + 1;
+    const { type, rawTypeText } = detectQuestionType(subElement);
+    const scoreEl = subElement.querySelector('.summary-sub-title');
+    const scoreText = scoreEl?.textContent?.trim() || '';
+    const subDescEl = subElement.querySelector(SUBJECT_DESCRIPTION_SELECTOR);
+    const subDescription = subDescEl?.textContent?.trim() || '';
+    const description = [parentDescription, subDescription].filter(Boolean).join('\n\n');
+    const images = extractQuestionImages(subElement);
+    const options = extractChoiceOptions(subElement);
+    const questionType = type === 'unknown' && options.length > 0 ? 'single_selection' : type;
+    const displayIndex = buildSubDisplayIndex(parentIndex, subIndex);
+
+    const question: Question = {
+      index: buildSubQuestionIndex(parentIndex, subIndex),
+      parentIndex,
+      subIndex,
+      displayIndex,
+      type: questionType,
+      sectionTitle,
+      scoreText,
+      description,
+      rawText: [parentDescription, subElement.textContent?.trim() || '']
+        .filter(Boolean)
+        .join('\n\n')
+        .substring(0, 2000),
+      blankCount: 0,
+      hasImage: images.length > 0,
+      images,
+      rawClassName: subElement.className,
+      rawTypeText,
+      modelHints: [
+        `综合题 ${parentIndex} 的第 ${subIndex} 小题（人类显示题号 ${displayIndex}），回填时需要定位到嵌套 .sub-subject`,
+      ],
+    };
+
+    if (['single_selection', 'multiple_selection', 'true_or_false'].includes(question.type) || options.length > 0) {
+      question.options = options;
+    }
+
+    return question;
+  });
 }
 
 /**
@@ -82,7 +235,7 @@ export function findSubjectElement(index: number): Element | null {
  */
 export function extractQuestions(): Question[] {
   const questions: Question[] = [];
-  const subjectElements = document.querySelectorAll('.subject');
+  const subjectElements = document.querySelectorAll(SUBJECT_SELECTOR);
 
   log(`DOM 中共找到 ${subjectElements.length} 个 .subject 元素`);
 
@@ -96,18 +249,10 @@ export function extractQuestions(): Question[] {
     const { type, rawTypeText } = detectQuestionType(element);
 
     // 获取题目序号 - 多选择器兜底
-    const indexEl =
-      element.querySelector('.subject-resort-index .ng-binding') ||
-      element.querySelector('.subject-resort-index') ||
-      element.querySelector('.subject-index');
-    let index = 0;
-    if (indexEl) {
-      const match = indexEl.textContent?.match(/(\d+)/);
-      index = match ? parseInt(match[1]) : 0;
-    }
+    let index = parseQuestionIndex(element);
 
     // 获取题目描述和分数
-    const descEl = element.querySelector('.subject-description');
+    const descEl = element.querySelector(SUBJECT_DESCRIPTION_SELECTOR);
     const description = descEl?.textContent?.trim() || '';
     const scoreEl = element.querySelector('.summary-sub-title');
     const hasScore = scoreEl && /\d+\s*分/.test(scoreEl.textContent || '');
@@ -132,6 +277,13 @@ export function extractQuestions(): Question[] {
     // 获取章节标题
     const sectionTitle = getCurrentSectionTitle(element);
 
+    if (hasAnalysisSubQuestions(element)) {
+      const subQuestions = extractAnalysisSubQuestions(element, index, sectionTitle);
+      log(`综合题 ${index}: 展开 ${subQuestions.length} 个嵌套小题`);
+      questions.push(...subQuestions);
+      return;
+    }
+
     // 提取图片
     const images = extractQuestionImages(element);
     const hasImage = images.length > 0;
@@ -139,16 +291,12 @@ export function extractQuestions(): Question[] {
     // 检测填空空位数（去重：同一个元素只算一次）
     let blankCount = 0;
     if (type === 'fill_in_blank') {
-      const descBlanks = new Set(
-        Array.from(
-          element.querySelectorAll('.subject-description [contenteditable="true"], .subject-description .___answer'),
-        ),
-      );
+      const descBlanks = new Set(Array.from(element.querySelectorAll(BLANK_IN_DESCRIPTION_SELECTOR)));
       if (descBlanks.size > 0) {
         blankCount = descBlanks.size;
       } else {
         const allBlanks = new Set(
-          Array.from(element.querySelectorAll('.___answer[contenteditable="true"], [contenteditable="true"]')),
+          Array.from(element.querySelectorAll(`${BLANK_ANSWER_SELECTOR}, [contenteditable="true"]`)),
         );
         blankCount = allBlanks.size;
       }
@@ -173,6 +321,7 @@ export function extractQuestions(): Question[] {
 
     const question: Question = {
       index,
+      displayIndex: buildTopDisplayIndex(index),
       type,
       sectionTitle,
       scoreText,
@@ -188,33 +337,13 @@ export function extractQuestions(): Question[] {
 
     // 提取选项（选择题、判断题）
     if (['single_selection', 'multiple_selection', 'true_or_false'].includes(type)) {
-      const options: Question['options'] = [];
-      const optionElements = element.querySelectorAll('.option');
-
-      optionElements.forEach((optEl) => {
-        const label = optEl.querySelector('.option-index')?.textContent?.trim() || '';
-        const content = optEl.querySelector('.option-content')?.textContent?.trim() || '';
-        const input = optEl.querySelector('input') as HTMLInputElement;
-        const value = input?.getAttribute('ng-value') || input?.value || '';
-
-        options.push({ label, content, value });
-      });
-
-      question.options = options;
+      question.options = extractChoiceOptions(element);
     }
 
     // unknown 类型也尝试提取选项（万一有选项结构）
     if (type === 'unknown') {
-      const optionElements = element.querySelectorAll('.option');
-      if (optionElements.length > 0) {
-        const options: Question['options'] = [];
-        optionElements.forEach((optEl) => {
-          const label = optEl.querySelector('.option-index')?.textContent?.trim() || '';
-          const content = optEl.querySelector('.option-content')?.textContent?.trim() || '';
-          const input = optEl.querySelector('input') as HTMLInputElement;
-          const value = input?.getAttribute('ng-value') || input?.value || '';
-          options.push({ label, content, value });
-        });
+      const options = extractChoiceOptions(element);
+      if (options.length > 0) {
         question.options = options;
         if (element.querySelector('input[type="radio"]')) {
           question.type = 'single_selection';

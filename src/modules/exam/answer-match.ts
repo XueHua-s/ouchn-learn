@@ -75,7 +75,7 @@ export function parseMatchingAnswer(answer: string | string[], question: Questio
 }
 
 /** DOM 侦测：输出匹配题区域的完整 DOM 特征 */
-function inspectMatchingDom(subjectEl: Element, questionIndex: number): void {
+function inspectMatchingDom(subjectEl: Element, questionDisplay: string): void {
   const draggables = subjectEl.querySelectorAll(
     '[draggable="true"], [dnd-draggable], [dnd-list], [ng-drop], ' +
       '[data-rbd-draggable-id], [data-rbd-droppable-id], .drag-item, .drop-item',
@@ -105,7 +105,7 @@ function inspectMatchingDom(subjectEl: Element, questionIndex: number): void {
     return /^[①②③④⑤⑥⑦⑧⑨⑩]$/.test(t);
   });
 
-  console.group(`[匹配题DOM检查] 题目 ${questionIndex}`);
+  console.group(`[匹配题DOM检查] 题目 ${questionDisplay}`);
   log('draggable 节点:', draggables.length);
   log('button 列表:', buttons);
   log('img 列表:', imgs);
@@ -132,30 +132,30 @@ export async function fillMatchingQuestion(
   answer: string | string[],
 ): Promise<boolean> {
   // DOM 侦测
-  inspectMatchingDom(subjectEl, question.index);
+  inspectMatchingDom(subjectEl, question.displayIndex);
 
   // 解析答案
   const matchMap = parseMatchingAnswer(answer, question);
   if (matchMap.size === 0) {
-    warn(`题目 ${question.index}: 无法解析匹配题答案`);
+    warn(`题目 ${question.displayIndex}: 无法解析匹配题答案`);
     return false;
   }
-  log(`题目 ${question.index}: 匹配答案解析结果`, Object.fromEntries(matchMap));
+  log(`题目 ${question.displayIndex}: 匹配答案解析结果`, Object.fromEntries(matchMap));
 
   // 策略 A：AngularJS scope 直接操作
-  const resultA = await tryAngularScope(subjectEl, question.index, matchMap);
+  const resultA = await tryAngularScope(subjectEl, question.displayIndex, matchMap);
   if (resultA) return true;
 
   // 策略 B：拖拽 DOM
-  const resultB = await tryDragAndDrop(subjectEl, question.index, matchMap);
+  const resultB = await tryDragAndDrop(subjectEl, question.displayIndex, matchMap);
   if (resultB) return true;
 
   // 策略 C：点击式匹配（选项可点 + 槽位可点）
-  const resultC = await tryClickToMatch(subjectEl, question.index, matchMap);
+  const resultC = await tryClickToMatch(subjectEl, question.displayIndex, matchMap);
   if (resultC) return true;
 
   // 策略 D：隐藏 input/select
-  const resultD = await tryHiddenInputs(subjectEl, question.index, matchMap);
+  const resultD = await tryHiddenInputs(subjectEl, question.displayIndex, matchMap);
   if (resultD) return true;
 
   // 所有策略失败
@@ -169,12 +169,12 @@ export async function fillMatchingQuestion(
       ? 'matching_ui_is_image_viewer'
       : 'no_real_droppable_nodes_found';
 
-  warn(`题目 ${question.index}: 匹配题所有填写策略失败`, { reason, matchMap: Object.fromEntries(matchMap) });
+  warn(`题目 ${question.displayIndex}: 匹配题所有填写策略失败`, { reason, matchMap: Object.fromEntries(matchMap) });
   return false;
 }
 
 /** 策略 A：AngularJS scope */
-async function tryAngularScope(subjectEl: Element, qIndex: number, matchMap: Map<string, string>): Promise<boolean> {
+async function tryAngularScope(subjectEl: Element, qDisplay: string, matchMap: Map<string, string>): Promise<boolean> {
   try {
     const ng = (window as any).angular;
     if (!ng) return false;
@@ -199,7 +199,7 @@ async function tryAngularScope(subjectEl: Element, qIndex: number, matchMap: Map
         }
         if (filled > 0) {
           scope.$apply?.();
-          log(`题目 ${qIndex}: Angular scope[${key}] 数组模式填入 ${filled} 项`);
+          log(`题目 ${qDisplay}: Angular scope[${key}] 数组模式填入 ${filled} 项`);
           return true;
         }
         continue;
@@ -216,7 +216,7 @@ async function tryAngularScope(subjectEl: Element, qIndex: number, matchMap: Map
       }
       if (filled > 0) {
         scope.$apply?.();
-        log(`题目 ${qIndex}: Angular scope[${key}] 对象模式填入 ${filled} 项`);
+        log(`题目 ${qDisplay}: Angular scope[${key}] 对象模式填入 ${filled} 项`);
         return true;
       }
     }
@@ -227,7 +227,7 @@ async function tryAngularScope(subjectEl: Element, qIndex: number, matchMap: Map
 }
 
 /** 策略 B：拖拽 */
-async function tryDragAndDrop(subjectEl: Element, qIndex: number, matchMap: Map<string, string>): Promise<boolean> {
+async function tryDragAndDrop(subjectEl: Element, qDisplay: string, matchMap: Map<string, string>): Promise<boolean> {
   const draggables = Array.from(
     subjectEl.querySelectorAll('[draggable="true"], [dnd-draggable], .drag-item'),
   ) as HTMLElement[];
@@ -255,12 +255,12 @@ async function tryDragAndDrop(subjectEl: Element, qIndex: number, matchMap: Map<
     }
   }
 
-  if (filled > 0) log(`题目 ${qIndex}: 拖拽模式填入 ${filled} 项`);
+  if (filled > 0) log(`题目 ${qDisplay}: 拖拽模式填入 ${filled} 项`);
   return filled > 0;
 }
 
 /** 策略 C：点击匹配 */
-async function tryClickToMatch(subjectEl: Element, qIndex: number, matchMap: Map<string, string>): Promise<boolean> {
+async function tryClickToMatch(subjectEl: Element, qDisplay: string, matchMap: Map<string, string>): Promise<boolean> {
   // 找所有可点击的选项和槽位
   const allClickable = Array.from(subjectEl.querySelectorAll('*')).filter((el) => {
     const style = window.getComputedStyle(el);
@@ -292,12 +292,12 @@ async function tryClickToMatch(subjectEl: Element, qIndex: number, matchMap: Map
     }
   }
 
-  if (filled > 0) log(`题目 ${qIndex}: 点击模式填入 ${filled} 项`);
+  if (filled > 0) log(`题目 ${qDisplay}: 点击模式填入 ${filled} 项`);
   return filled > 0;
 }
 
 /** 策略 D：隐藏 input/select */
-async function tryHiddenInputs(subjectEl: Element, qIndex: number, matchMap: Map<string, string>): Promise<boolean> {
+async function tryHiddenInputs(subjectEl: Element, qDisplay: string, matchMap: Map<string, string>): Promise<boolean> {
   const hiddenInputs = Array.from(
     subjectEl.querySelectorAll('input[type="hidden"], select, [ng-model]'),
   ) as HTMLElement[];
@@ -328,6 +328,6 @@ async function tryHiddenInputs(subjectEl: Element, qIndex: number, matchMap: Map
     }
   }
 
-  if (filled > 0) log(`题目 ${qIndex}: 隐藏输入模式填入 ${filled} 项`);
+  if (filled > 0) log(`题目 ${qDisplay}: 隐藏输入模式填入 ${filled} 项`);
   return filled > 0;
 }

@@ -53,6 +53,24 @@
   适用于 review 当前 diff，优先报告 bug、风险和测试缺口。
 - `skills/frontend-design/SKILL.md`
   适用于面板 UI、交互和视觉质量提升。
+- `skills/sdd-plan/SKILL.md`
+  适用于 SDD（Specification Driven Development）规格驱动开发流程：把 `.specs/tasks/draft/` 中的草稿任务，通过 6 阶段多智能体工作流（Parallel Analysis → Architecture Synthesis → Decomposition → Parallelize → Verify → Promote）逐步细化、并行化、加质量门禁，最终晋升到 `.specs/tasks/todo/`。配合 `skills/sdd-plan/analyse-business-requirements.md` 作为业务分析阶段的子手册。
+
+## SDD 模式触发规则（强制）
+
+只要用户请求中出现以下任意条件，**自动加载并按 `skills/sdd-plan/SKILL.md` 的流程执行**，无需二次确认：
+
+- 显式提及：`sdd`、`SDD`、`sdd:plan`、`/sdd:plan`、`spec-driven`、`specification driven`、`规格驱动`、`spec kit`、`OpenSpec`
+- 隐式语义：要求“按 SDD 做计划”、“refine / promote draft task”、“多阶段开发计划+评审”、“LLM-as-Judge 质量门禁”、“把草稿任务推进到正式 todo”
+- 上下文存在 `.specs/tasks/draft/*.md`，且用户要求继续推进/拆分/验收
+
+执行约定：
+
+1. 必须先读取 `skills/sdd-plan/SKILL.md` 全文，再读取 `skills/sdd-plan/analyse-business-requirements.md`。
+2. 严格按照 6 阶段顺序执行，并保留每阶段的 judge 质量门禁；`--fast` / `--one-shot` 等参数只在用户明确指定时启用。
+3. SDD 流程不替换 `Working Rules` 与 `Build And Verification` 章节的本地约束：TypeScript / pnpm / IIFE / Tampermonkey 沙箱、禁止 Node.js 专属 API、优先复用 `src/utils/*`、`src/constants/*` 仍然成立。
+4. SDD 流程内若需要做模块设计、code review、UI 设计，按上面的 Skill Routing 串联对应 skill，而不是放弃 SDD 主流程。
+5. 若 `${CLAUDE_PLUGIN_ROOT}` 不可用或 `scripts/create-scratchpad.sh` 缺失，使用本仓库的相对路径与等价 Shell 实现，不要因此中断。
 
 ## Working Rules
 
