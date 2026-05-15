@@ -73,6 +73,18 @@ export function detectQuestionType(element: Element): { type: QuestionType; rawT
 // 图片提取
 // ============================================================
 
+function isIgnoredImageContainer(element: Element): boolean {
+  return !!element.closest('.pswp, .pswp__ui, .pswp__bg, .pswp__scroll-wrap, .my-gallery, [aria-hidden="true"]');
+}
+
+function isVisibleElement(element: Element): boolean {
+  const htmlEl = element as HTMLElement;
+  const style = window.getComputedStyle(element);
+  if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+  const rect = htmlEl.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0;
+}
+
 /**
  * 提取题目中的所有图片信息
  */
@@ -81,6 +93,8 @@ export function extractQuestionImages(element: Element): QuestionImage[] {
   const imgElements = element.querySelectorAll('img');
 
   imgElements.forEach((img) => {
+    if (isIgnoredImageContainer(img) || !isVisibleElement(img)) return;
+
     const src = img.src || img.getAttribute('src') || '';
     const alt = img.alt || '';
 
@@ -98,6 +112,8 @@ export function extractQuestionImages(element: Element): QuestionImage[] {
   // 检查背景图
   const allElements = element.querySelectorAll('*');
   allElements.forEach((el) => {
+    if (isIgnoredImageContainer(el) || !isVisibleElement(el)) return;
+
     const style = window.getComputedStyle(el);
     const bgImage = style.backgroundImage;
     if (bgImage && bgImage !== 'none' && bgImage.startsWith('url(')) {
