@@ -412,12 +412,7 @@ async function tryDragAndDrop(subjectEl: Element, qDisplay: string, matchMap: Ma
       (el) => el.textContent?.trim().includes(_slotKey) || el.closest(`[data-index="${_slotKey}"]`),
     );
     if (source && target) {
-      const dt = new DataTransfer();
-      source.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: dt }));
-      target.dispatchEvent(new DragEvent('dragenter', { bubbles: true, cancelable: true, dataTransfer: dt }));
-      target.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt }));
-      target.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
-      source.dispatchEvent(new DragEvent('dragend', { bubbles: true, cancelable: true, dataTransfer: dt }));
+      if (!dispatchStandardDrag(source, target)) continue;
       await new Promise((r) => setTimeout(r, 200));
       filled++;
     }
@@ -433,7 +428,17 @@ function getOuchnMatchingRows(subjectEl: Element): HTMLElement[] {
   }) as HTMLElement[];
 }
 
-function dispatchDragCloneable(source: HTMLElement, target: HTMLElement): void {
+function createDragEvent(type: string, dataTransfer: DataTransfer): DragEvent | Event {
+  try {
+    return new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer });
+  } catch {
+    const event = new Event(type, { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'dataTransfer', { value: dataTransfer });
+    return event;
+  }
+}
+
+function dispatchDragCloneable(source: HTMLElement, target: HTMLElement): boolean {
   const dt = new DataTransfer();
   const events: Array<[HTMLElement, string]> = [
     [source, 'mousedown'],
@@ -445,13 +450,34 @@ function dispatchDragCloneable(source: HTMLElement, target: HTMLElement): void {
     [target, 'mouseup'],
   ];
 
-  events.forEach(([el, type]) => {
-    if (type.startsWith('drag') || type === 'drop') {
-      el.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt }));
-    } else {
-      el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
-    }
-  });
+  try {
+    events.forEach(([el, type]) => {
+      if (type.startsWith('drag') || type === 'drop') {
+        el.dispatchEvent(createDragEvent(type, dt));
+      } else {
+        el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true }));
+      }
+    });
+    return true;
+  } catch (err) {
+    warn('OUCHN 匹配题拖拽事件派发失败，已跳过拖拽兜底:', err);
+    return false;
+  }
+}
+
+function dispatchStandardDrag(source: HTMLElement, target: HTMLElement): boolean {
+  try {
+    const dt = new DataTransfer();
+    source.dispatchEvent(createDragEvent('dragstart', dt));
+    target.dispatchEvent(createDragEvent('dragenter', dt));
+    target.dispatchEvent(createDragEvent('dragover', dt));
+    target.dispatchEvent(createDragEvent('drop', dt));
+    source.dispatchEvent(createDragEvent('dragend', dt));
+    return true;
+  } catch (err) {
+    warn('匹配题标准拖拽事件派发失败，已跳过拖拽兜底:', err);
+    return false;
+  }
 }
 
 async function tryOuchnCloneableDrag(
@@ -480,7 +506,7 @@ async function tryOuchnCloneableDrag(
     const target = row.querySelector('[drag-type="to"]') as HTMLElement | null;
     if (!source || !target) continue;
 
-    dispatchDragCloneable(source, target);
+    if (!dispatchDragCloneable(source, target)) continue;
     target.dispatchEvent(new Event('change', { bubbles: true }));
     await new Promise((r) => setTimeout(r, 250));
 
