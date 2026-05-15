@@ -34,8 +34,10 @@ function buildSystemPrompt(): string {
 /** 构建单道题的 user prompt */
 function buildSingleQuestionPrompt(q: Question, customPrompt: string): string {
   const questionText = q.description.length > 10 ? q.description : q.rawText.substring(0, 2000);
+  // FIXED: 给 AI 看的是 displayIndex（"21" 或 "21.3"），AI 友好；
+  //        我们仅用 q.index（整数）做内部 round-trip，AI 返回的 index 我们也不信任。
   const item: Record<string, any> = {
-    index: q.index,
+    index: q.displayIndex,
     type: q.type,
     section: q.sectionTitle,
     score: q.scoreText,
@@ -176,6 +178,7 @@ async function callGemini(
 function parseSingleAnswer(
   rawContent: string,
   expectedIndex: number,
+  displayIndex: string,
 ): { index: number; answer: string | string[] } | null {
   let content = rawContent.trim();
 
@@ -189,11 +192,12 @@ function parseSingleAnswer(
 
   try {
     const parsed = JSON.parse(content);
-    // FIXED: 逐题模式下强制用 expectedIndex，不信任 AI 返回的 index，
-    // 防止 AI 返回错误题号导致答案错配
+    // FIXED: 逐题模式下强制用 expectedIndex（整数），不信任 AI 返回的 index。
+    //        AI 看到的是 displayIndex 字符串，可能返回 "21.3" 也可能返回 21；
+    //        我们一律忽略并强制写回内部整数 index，保证 answerMap 命中。
     if (parsed.answer !== undefined) {
       if (!isValidAnswer(parsed.answer)) {
-        warn(`题目 ${expectedIndex}: AI 返回无效答案 "${String(parsed.answer).substring(0, 50)}"，丢弃`);
+        warn(`题目 ${displayIndex}: AI 返回无效答案 "${String(parsed.answer).substring(0, 50)}"，丢弃`);
         return null;
       }
       return { index: expectedIndex, answer: parsed.answer };
@@ -201,15 +205,15 @@ function parseSingleAnswer(
     if (parsed.questions?.[0]?.answer !== undefined) {
       const q = parsed.questions[0];
       if (!isValidAnswer(q.answer)) {
-        warn(`题目 ${expectedIndex}: AI 返回无效答案，丢弃`);
+        warn(`题目 ${displayIndex}: AI 返回无效答案，丢弃`);
         return null;
       }
       return { index: expectedIndex, answer: q.answer };
     }
-    warn(`题目 ${expectedIndex}: AI 返回结构无 answer 字段`);
+    warn(`题目 ${displayIndex}: AI 返回结构无 answer 字段`);
     return null;
   } catch {
-    error(`题目 ${expectedIndex}: JSON 解析失败，原文:`, rawContent.substring(0, 300));
+    error(`题目 ${displayIndex}: JSON 解析失败，原文:`, rawContent.substring(0, 300));
     return null;
   }
 }
@@ -272,9 +276,9 @@ async function callSingleQuestion(
       throw new Error(`不支持的 provider: ${config.provider}`);
     }
 
-    return parseSingleAnswer(rawContent, q.index);
+    return parseSingleAnswer(rawContent, q.index, q.displayIndex);
   } catch (err) {
-    error(`题目 ${q.index} 请求失败:`, err instanceof Error ? err.message : err);
+    error(`题目 ${q.displayIndex} 请求失败:`, err instanceof Error ? err.message : err);
     return null;
   }
 }

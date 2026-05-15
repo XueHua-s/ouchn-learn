@@ -2,7 +2,7 @@
  * AI 答题面板：UI 创建、配置管理、主流程编排
  */
 
-import type { ExamConfig, ExamStats } from '@/types/exam';
+import type { ExamConfig, ExamStats, Question } from '@/types/exam';
 import { log, warn, error } from '@/types/exam';
 import { makeDraggable } from '@/utils/helper';
 import { saveExamConfig, getExamConfig } from '@/utils/storage';
@@ -10,7 +10,18 @@ import { waitForQuestionsStable, extractQuestions } from './question-extract';
 import { callProvider } from './ai-provider';
 import { fillAnswers } from './answer-fill';
 
-function printExamStats(stats: ExamStats): void {
+/**
+ * 把 stats 中的整数 index 列表映射回人类可读的 displayIndex 列表。
+ * FIXED: 综合题子题 index 用 `parent*1000+sub` 编码，console 直接打印 `21003`
+ *        会让用户困惑；这里用 questions 数组里同步保存的 displayIndex 翻译回 "21.3"。
+ */
+function toDisplayIndexes(indexes: number[], questions: Question[]): string[] {
+  const map = new Map<number, string>();
+  questions.forEach((q) => map.set(q.index, q.displayIndex));
+  return indexes.map((idx) => map.get(idx) ?? String(idx));
+}
+
+function printExamStats(stats: ExamStats, questions: Question[]): void {
   log('===== 答题统计 =====');
   console.table({
     'DOM .subject 总数': stats.totalDomSubjects,
@@ -26,16 +37,16 @@ function printExamStats(stats: ExamStats): void {
   });
 
   if (stats.skippedQuestions.length > 0) {
-    warn('AI 未返回答案的题目:', stats.skippedQuestions.join(', '));
+    warn('AI 未返回答案的题目:', toDisplayIndexes(stats.skippedQuestions, questions).join(', '));
   }
   if (stats.fillFailedQuestions.length > 0) {
-    warn('填写失败的题目:', stats.fillFailedQuestions.join(', '));
+    warn('填写失败的题目:', toDisplayIndexes(stats.fillFailedQuestions, questions).join(', '));
   }
   if (stats.unknownTypeQuestions.length > 0) {
-    warn('未识别题型的题目:', stats.unknownTypeQuestions.join(', '));
+    warn('未识别题型的题目:', toDisplayIndexes(stats.unknownTypeQuestions, questions).join(', '));
   }
   if (stats.degradedImageQuestions.length > 0) {
-    warn('图片降级为文本模式的题目:', stats.degradedImageQuestions.join(', '));
+    warn('图片降级为文本模式的题目:', toDisplayIndexes(stats.degradedImageQuestions, questions).join(', '));
   }
 }
 
@@ -56,6 +67,9 @@ async function startAutoExam(config: ExamConfig): Promise<void> {
     degradedImageQuestions: [],
   };
 
+  // FIXED: questions 提到 try 外，确保 catch 分支也能拿到（可能为空数组）。
+  let questions: Question[] = [];
+
   try {
     showStatus('正在等待页面加载稳定...', 'info');
 
@@ -71,7 +85,7 @@ async function startAutoExam(config: ExamConfig): Promise<void> {
     showStatus(`检测到 ${stableCount} 个题目元素，正在提取...`, 'info');
 
     // 提取题目
-    const questions = extractQuestions();
+    questions = extractQuestions();
     stats.extractedCount = questions.length;
     stats.unknownTypeQuestions = questions.filter((q) => q.type === 'unknown').map((q) => q.index);
 
@@ -101,7 +115,7 @@ async function startAutoExam(config: ExamConfig): Promise<void> {
     await fillAnswers(questions, aiResponse, stats);
 
     // 打印统计
-    printExamStats(stats);
+    printExamStats(stats, questions);
 
     // 构建完成信息
     const parts = [`成功填写 ${stats.filledCount}/${questions.length} 道题`];
@@ -119,7 +133,7 @@ async function startAutoExam(config: ExamConfig): Promise<void> {
     showStatus(parts.join('，'), statusType);
   } catch (err) {
     error('自动答题失败:', err);
-    printExamStats(stats);
+    printExamStats(stats, questions);
     showStatus(`答题失败: ${err instanceof Error ? err.message : '未知错误'}`, 'error');
   }
 }

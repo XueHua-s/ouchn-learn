@@ -7,21 +7,33 @@ import { log, warn, isValidAnswer } from '@/types/exam';
 import { findQuestionElement } from './question-extract';
 import { fillEditable, fillTextarea, writeWithVerify, waitForEditor } from './answer-write';
 import { fillMatchingQuestion } from './answer-match';
+import {
+  ANSWER_AREA_SELECTOR,
+  BLANK_ANSWER_SELECTOR,
+  ESSAY_FALLBACK_EDITOR_SELECTOR,
+  ESSAY_PRIMARY_EDITOR_SELECTORS,
+  OPTION_SELECTOR,
+  SUBJECT_DESCRIPTION_SELECTOR,
+  isInsideSubjectDescription,
+} from './selectors';
+
+/** 简答题主编辑器选择器（合成一条 selector 字符串供 querySelectorAll 一次拿到所有候选） */
+const ESSAY_PRIMARY_EDITOR_SELECTOR = ESSAY_PRIMARY_EDITOR_SELECTORS.join(', ');
 
 /**
  * 在 subject 元素中查找作答编辑器（排除题目描述中的 contenteditable）
  */
 function findAnswerEditors(subjectEl: Element, type: QuestionType): HTMLElement[] {
   if (type === 'fill_in_blank') {
-    let editors = Array.from(subjectEl.querySelectorAll('.___answer[contenteditable="true"]')) as HTMLElement[];
+    let editors = Array.from(subjectEl.querySelectorAll(BLANK_ANSWER_SELECTOR)) as HTMLElement[];
     if (editors.length === 0) {
       editors = Array.from(
-        subjectEl.querySelectorAll('.subject-description [contenteditable="true"]'),
+        subjectEl.querySelectorAll(`${SUBJECT_DESCRIPTION_SELECTOR} [contenteditable="true"]`),
       ) as HTMLElement[];
     }
     if (editors.length === 0) {
       editors = (Array.from(subjectEl.querySelectorAll('[contenteditable="true"]')) as HTMLElement[]).filter((el) => {
-        const parent = el.closest('.subject-operate, .subject-answer, .answer-area, .blank-area');
+        const parent = el.closest(`${ANSWER_AREA_SELECTOR}, .blank-area`);
         if (parent) return true;
         if (el.children.length > 5) return false;
         return true;
@@ -32,15 +44,11 @@ function findAnswerEditors(subjectEl: Element, type: QuestionType): HTMLElement[
 
   if (type === 'short_answer' || type === 'unknown') {
     const visibleEditors = (
-      Array.from(
-        subjectEl.querySelectorAll(
-          '.simditor-body[contenteditable="true"], .answer-area-container [contenteditable="true"], .answer-content [contenteditable="true"]',
-        ),
-      ) as HTMLElement[]
-    ).filter((el) => !el.closest('.subject-description'));
+      Array.from(subjectEl.querySelectorAll(ESSAY_PRIMARY_EDITOR_SELECTOR)) as HTMLElement[]
+    ).filter((el) => !isInsideSubjectDescription(el));
     if (visibleEditors.length > 0) return visibleEditors;
 
-    const answerArea = subjectEl.querySelector('.subject-operate, .subject-answer, .answer-area');
+    const answerArea = subjectEl.querySelector(ANSWER_AREA_SELECTOR);
     if (answerArea) {
       const editables = Array.from(answerArea.querySelectorAll('[contenteditable="true"]')) as HTMLElement[];
       if (editables.length > 0) return editables;
@@ -48,7 +56,7 @@ function findAnswerEditors(subjectEl: Element, type: QuestionType): HTMLElement[
 
     const editables = (Array.from(subjectEl.querySelectorAll('[contenteditable="true"]')) as HTMLElement[]).filter(
       (el) => {
-        if (el.closest('.subject-description')) return false;
+        if (isInsideSubjectDescription(el)) return false;
         if (el.offsetHeight < 20 && el.offsetWidth < 50) return false;
         return true;
       },
@@ -62,22 +70,34 @@ function findAnswerEditors(subjectEl: Element, type: QuestionType): HTMLElement[
   return [];
 }
 
-function syncEssayFallbackEditors(subjectEl: Element, primaryEditor: HTMLElement, answerText: string): void {
-  const fallbackEditors = Array.from(
-    subjectEl.querySelectorAll('textarea, .simditor-body[contenteditable="true"]'),
-  ) as HTMLElement[];
+/**
+ * 同步简答题的 fallback 编辑器（隐藏 textarea / 平行 Simditor 实例）。
+ *
+ * FIXED: OUCHN 的 Simditor 通常会维护一个隐藏 textarea 作为表单提交字段；只写主编辑器
+ *        而忽略 textarea，提交时可能拿到空字符串。这里把所有 fallback 编辑器都写一遍并
+ *        用 writeWithVerify 校验，任何一个 fallback 失败都会被记录到日志（但不当作主流程失败，
+ *        因为主编辑器已写入并触发了 angular digest，提交字段同步是"加固"层）。
+ *
+ * 返回成功同步的 fallback 数量；调用方仅用于日志，不影响 fillFailedQuestions 计数，
+ * 避免主流程因为隐藏字段语义不明而误报失败。
+ */
+async function syncEssayFallbackEditors(
+  subjectEl: Element,
+  primaryEditor: HTMLElement,
+  answerText: string,
+): Promise<number> {
+  const fallbackEditors = Array.from(subjectEl.querySelectorAll(ESSAY_FALLBACK_EDITOR_SELECTOR)) as HTMLElement[];
 
-  fallbackEditors.forEach((editor) => {
-    if (editor === primaryEditor) return;
-    if (editor.closest('.subject-description')) return;
+  let synced = 0;
+  for (const editor of fallbackEditors) {
+    if (editor === primaryEditor) continue;
+    if (isInsideSubjectDescription(editor)) continue;
 
-    if (editor instanceof HTMLTextAreaElement) {
-      fillTextarea(editor, answerText);
-      return;
-    }
-
-    fillEditable(editor, answerText);
-  });
+    const writeFn = editor instanceof HTMLTextAreaElement ? fillTextarea : fillEditable;
+    const ok = await writeWithVerify(editor, answerText, writeFn);
+    if (ok) synced++;
+  }
+  return synced;
 }
 
 /**
@@ -102,7 +122,7 @@ function fillChoiceQuestion(subjectEl: Element, question: Question, answer: stri
     }
   }
 
-  const optionElements = Array.from(subjectEl.querySelectorAll('.option'));
+  const optionElements = Array.from(subjectEl.querySelectorAll(OPTION_SELECTOR));
   const cleanAnswer = answerLabel.replace(/[.、．\s]/g, '');
   let targetEl = optionElements.find((optEl) => {
     const indexEl = optEl.querySelector('.option-index');
@@ -114,12 +134,27 @@ function fillChoiceQuestion(subjectEl: Element, question: Question, answer: stri
     return optText === cleanAnswer;
   });
 
+  // FIXED: 单选/判断题在按字母 label 找不到时，尝试用 AI 返回的"内容文本"匹配选项。
+  //        ① 优先严格相等（content === rawAnswer），避免互相包含的选项被误选；
+  //        ② 仅当 rawAnswer 长度 ≥3 时才走 includes 兜底，过短的字符（如 "对"/"错"/"是"/"否"）
+  //           做 includes 反而容易把"对"匹配到"绝对正确"等长选项；判断题"对/错"在
+  //           question.options 阶段已经能按 label 命中，不需要靠 includes。
   if (!targetEl && (question.type === 'single_selection' || question.type === 'true_or_false')) {
     const rawAnswer = (typeof answer === 'string' ? answer : '').trim();
-    targetEl = optionElements.find((optEl) => {
-      const content = optEl.querySelector('.option-content')?.textContent?.trim() || '';
-      return content === rawAnswer || content.includes(rawAnswer) || rawAnswer.includes(content);
-    });
+    if (rawAnswer) {
+      const exact = optionElements.find((optEl) => {
+        const content = optEl.querySelector('.option-content')?.textContent?.trim() || '';
+        return content === rawAnswer;
+      });
+      if (exact) {
+        targetEl = exact;
+      } else if (rawAnswer.length >= 3) {
+        targetEl = optionElements.find((optEl) => {
+          const content = optEl.querySelector('.option-content')?.textContent?.trim() || '';
+          return content.includes(rawAnswer) || rawAnswer.includes(content);
+        });
+      }
+    }
   }
 
   if (targetEl) {
@@ -149,9 +184,10 @@ function fillMultipleChoiceQuestion(subjectEl: Element, _question: Question, ans
   if (answerLabels.length === 0) return false;
 
   let filled = 0;
+  // FIXED: 把 querySelectorAll 提到循环外，避免每个 label 都重新扫描 DOM。
+  const optionElements = Array.from(subjectEl.querySelectorAll(OPTION_SELECTOR));
   answerLabels.forEach((label) => {
     const cleanLabel = label.replace(/[.、．\s]/g, '');
-    const optionElements = Array.from(subjectEl.querySelectorAll('.option'));
     const targetEl = optionElements.find((optEl) => {
       const indexEl = optEl.querySelector('.option-index');
       const optText =
@@ -180,7 +216,7 @@ function fillMultipleChoiceQuestion(subjectEl: Element, _question: Question, ans
 async function fillBlankQuestion(subjectEl: Element, question: Question, answer: string | string[]): Promise<boolean> {
   const editors = findAnswerEditors(subjectEl, 'fill_in_blank');
   if (editors.length === 0) {
-    warn(`题目 ${question.index}: 未找到填空编辑器`);
+    warn(`题目 ${question.displayIndex}: 未找到填空编辑器`);
     return false;
   }
 
@@ -206,7 +242,7 @@ async function fillBlankQuestion(subjectEl: Element, question: Question, answer:
     const writeFn = editor instanceof HTMLTextAreaElement ? fillTextarea : fillEditable;
     const ok = await writeWithVerify(editor, value, writeFn);
     if (ok) filled++;
-    log(`题目 ${question.index} 空位 ${idx + 1}: ${ok ? '已填入' : '写入失败'} "${value.substring(0, 30)}"`);
+    log(`题目 ${question.displayIndex} 空位 ${idx + 1}: ${ok ? '已填入' : '写入失败'} "${value.substring(0, 30)}"`);
   }
   return filled > 0;
 }
@@ -217,7 +253,7 @@ async function fillBlankQuestion(subjectEl: Element, question: Question, answer:
 async function fillEssayQuestion(subjectEl: Element, question: Question, answer: string | string[]): Promise<boolean> {
   const answerText = Array.isArray(answer) ? answer.join('\n') : String(answer);
   if (!answerText || !isValidAnswer(answerText)) {
-    warn(`题目 ${question.index}: 答案无效，跳过填写`);
+    warn(`题目 ${question.displayIndex}: 答案无效，跳过填写`);
     return false;
   }
 
@@ -227,15 +263,19 @@ async function fillEssayQuestion(subjectEl: Element, question: Question, answer:
     if (editor) editors = [editor];
   }
   if (editors.length === 0) {
-    warn(`题目 ${question.index}: 未找到简答题编辑器`);
+    warn(`题目 ${question.displayIndex}: 未找到简答题编辑器`);
     return false;
   }
 
   const editor = editors[0];
   const writeFn = editor instanceof HTMLTextAreaElement ? fillTextarea : fillEditable;
   const verified = await writeWithVerify(editor, answerText, writeFn);
-  syncEssayFallbackEditors(subjectEl, editor, answerText);
-  log(`题目 ${question.index}: 填入简答答案 (${answerText.length}字, verified=${verified})`);
+  // FIXED: 必须 await fallback 同步——以前 fire-and-forget 会让主流程在 stats 统计完成后
+  //        才真正写完隐藏 textarea，提交时可能拿到旧值。
+  const fallbackCount = await syncEssayFallbackEditors(subjectEl, editor, answerText);
+  log(
+    `题目 ${question.displayIndex}: 填入简答答案 (${answerText.length}字, verified=${verified}, fallback 同步 ${fallbackCount} 个)`,
+  );
   return true;
 }
 
@@ -251,7 +291,7 @@ async function fillAnswerForQuestion(
 ): Promise<boolean> {
   const subjectEl = findQuestionElement(question);
   if (!subjectEl) {
-    warn(`题目 ${question.index}: 未找到 DOM 元素`);
+    warn(`题目 ${question.displayIndex}: 未找到 DOM 元素`);
     stats.fillFailedQuestions.push(question.index);
     return false;
   }
@@ -283,10 +323,10 @@ async function fillAnswerForQuestion(
 
   if (success) {
     stats.filledCount++;
-    log(`题目 ${question.index} (${question.type}): 填写成功`);
+    log(`题目 ${question.displayIndex} (${question.type}): 填写成功`);
   } else {
     stats.fillFailedQuestions.push(question.index);
-    warn(`题目 ${question.index} (${question.type}): 填写失败`);
+    warn(`题目 ${question.displayIndex} (${question.type}): 填写失败`);
   }
   return success;
 }
@@ -316,7 +356,7 @@ export async function fillAnswers(questions: Question[], aiResponse: AIResponse,
     const answer = answerMap.get(question.index);
     if (answer === undefined || answer === null) {
       stats.skippedQuestions.push(question.index);
-      warn(`题目 ${question.index}: AI 未返回答案，跳过`);
+      warn(`题目 ${question.displayIndex}: AI 未返回答案，跳过`);
       continue;
     }
     await fillAnswerForQuestion(question, answer, stats);

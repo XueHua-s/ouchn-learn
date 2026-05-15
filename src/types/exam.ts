@@ -27,12 +27,38 @@ export interface QuestionImage {
   base64?: string;
 }
 
+/**
+ * 综合题子题号编码倍数。
+ * FIXED: 用整数 `parentIndex * SUB_INDEX_MULTIPLIER + subIndex` 编码子题 index，
+ *        替代旧的 `Number("21.03")` 浮点编码方案。理由：
+ *        ① 浮点 21.3 ≠ 21.03 会让 AI 返回 "21.3" 时 answerMap 匹配失败；
+ *        ② padStart(2) 只支持 ≤99 个子题，且写在 stats 数组里和真实题号混淆；
+ *        ③ 整数编码可以稳定 round-trip JSON、做 Map key、排序、打印。
+ *        SUB_INDEX_MULTIPLIER=1000 支持每父题最多 999 个子题，远大于现实需求；
+ *        与真实顶层题号区分（顶层题号通常为 1-100，子题 index 总会 ≥1001）。
+ *        修改此常量需要同步检查：buildSubQuestionIndex / decodeSubQuestionIndex /
+ *        AI prompt 中对 index 编码的描述。
+ */
+export const SUB_INDEX_MULTIPLIER = 1000;
+
 export interface Question {
+  /**
+   * 题目唯一标识。
+   * - 顶层题：使用 DOM 中解析出的题号（1-based 整数）。
+   * - 综合题展开后的子题：`parentIndex * SUB_INDEX_MULTIPLIER + subIndex`，例如父 21 子 3 → 21003。
+   * 始终是整数，可安全用作 Map key 和 stats 数组元素。
+   */
   index: number;
   /** 综合题展开后的小题会保留父题号，用于回填时重新定位嵌套 DOM */
   parentIndex?: number;
-  /** 综合题展开后的小题序号，例如 21 题下的第 3 小题 */
+  /** 综合题展开后的小题序号，例如 21 题下的第 3 小题（1-based） */
   subIndex?: number;
+  /**
+   * 给人类阅读的题号字符串。
+   * - 顶层题：`"21"`
+   * - 子题：`"21.3"`（与 index 编码无关，仅用于日志/UI/AI prompt 的人类可读标识）
+   */
+  displayIndex: string;
   type: QuestionType;
   sectionTitle: string;
   scoreText: string;
