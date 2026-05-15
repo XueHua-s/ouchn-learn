@@ -1,6 +1,80 @@
-import { STORAGE_KEY, RETURN_URL_KEY, COURSE_CONFIG_KEY, MATERIAL_CACHE_KEY, EXAM_CONFIG_KEY } from '@/constants';
+import {
+  STORAGE_KEY,
+  RETURN_URL_KEY,
+  COURSE_CONFIG_KEY,
+  MATERIAL_CACHE_KEY,
+  EXAM_CONFIG_KEY,
+  DEFAULT_OPENAI_MODEL,
+  DEFAULT_OPENAI_BASE_URL,
+  DEFAULT_CLAUDE_MODEL,
+  DEFAULT_CLAUDE_BASE_URL,
+} from '@/constants';
 import type { ViewState, CourseConfig, MaterialAttachment } from '@/types';
 import type { ExamConfig } from '@/types/exam';
+
+type ExamProvider = ExamConfig['provider'];
+type ProviderConfig = ExamConfig['providers'][ExamProvider];
+
+function getDefaultProviderConfig(provider: ExamProvider): ProviderConfig {
+  if (provider === 'claude') {
+    return {
+      modelName: DEFAULT_CLAUDE_MODEL,
+      apiKey: '',
+      apiBaseUrl: DEFAULT_CLAUDE_BASE_URL,
+    };
+  }
+
+  return {
+    modelName: DEFAULT_OPENAI_MODEL,
+    apiKey: '',
+    apiBaseUrl: DEFAULT_OPENAI_BASE_URL,
+  };
+}
+
+function withProviderDefaults(provider: ExamProvider, config?: ProviderConfig): ProviderConfig {
+  const defaults = getDefaultProviderConfig(provider);
+  return {
+    modelName: config?.modelName || defaults.modelName,
+    apiKey: config?.apiKey || '',
+    apiBaseUrl: config?.apiBaseUrl || defaults.apiBaseUrl,
+  };
+}
+
+function createDefaultExamConfig(): ExamConfig {
+  const providers = {
+    openai: getDefaultProviderConfig('openai'),
+    claude: getDefaultProviderConfig('claude'),
+  };
+
+  return {
+    provider: 'openai',
+    modelName: providers.openai.modelName,
+    apiKey: providers.openai.apiKey,
+    apiBaseUrl: providers.openai.apiBaseUrl,
+    customPrompt: '',
+    concurrency: 3,
+    providers,
+  };
+}
+
+function normalizeExamConfig(config: ExamConfig): ExamConfig {
+  const provider: ExamProvider = config.provider === 'claude' ? 'claude' : 'openai';
+  const providers = {
+    openai: withProviderDefaults('openai', config.providers.openai),
+    claude: withProviderDefaults('claude', config.providers.claude),
+  };
+
+  const activeProviderConfig = providers[provider];
+  return {
+    provider,
+    modelName: activeProviderConfig.modelName,
+    apiKey: activeProviderConfig.apiKey,
+    apiBaseUrl: activeProviderConfig.apiBaseUrl,
+    customPrompt: config.customPrompt || '',
+    concurrency: Math.max(1, config.concurrency || 3),
+    providers,
+  };
+}
 
 /**
  * 保存查看状态到 localStorage
@@ -120,7 +194,7 @@ export function clearMaterialCache(): void {
  */
 export function saveExamConfig(config: ExamConfig): void {
   try {
-    localStorage.setItem(EXAM_CONFIG_KEY, JSON.stringify(config));
+    localStorage.setItem(EXAM_CONFIG_KEY, JSON.stringify(normalizeExamConfig(config)));
   } catch (e) {
     console.error('[AI答题] 保存配置失败:', e);
   }
@@ -133,25 +207,10 @@ export function getExamConfig(): ExamConfig {
   try {
     const stored = localStorage.getItem(EXAM_CONFIG_KEY);
     if (stored) {
-      const config = JSON.parse(stored);
-      if (!config.provider) config.provider = 'openai';
-      if (config.provider === 'gemini') {
-        config.provider = 'claude';
-        config.modelName = 'claude-sonnet-4-6';
-        config.apiBaseUrl = 'https://aigw.c5y.moe';
-      }
-      if (!config.concurrency || config.concurrency < 1) config.concurrency = 3;
-      return config;
+      return normalizeExamConfig(JSON.parse(stored));
     }
   } catch (e) {
     console.error('[AI答题] 读取配置失败:', e);
   }
-  return {
-    provider: 'openai',
-    modelName: 'gpt-4.1',
-    apiKey: '',
-    apiBaseUrl: 'https://api.openai.com/v1',
-    customPrompt: '',
-    concurrency: 3,
-  };
+  return createDefaultExamConfig();
 }

@@ -4,6 +4,12 @@
 
 import type { ExamConfig, ExamStats, Question } from '@/types/exam';
 import { log, warn, error } from '@/types/exam';
+import {
+  DEFAULT_CLAUDE_BASE_URL,
+  DEFAULT_CLAUDE_MODEL,
+  DEFAULT_OPENAI_BASE_URL,
+  DEFAULT_OPENAI_MODEL,
+} from '@/constants';
 import { makeDraggable } from '@/utils/helper';
 import { saveExamConfig, getExamConfig } from '@/utils/storage';
 import { waitForQuestionsStable, extractQuestions } from './question-extract';
@@ -105,7 +111,9 @@ async function startAutoExam(config: ExamConfig): Promise<void> {
     log('AI 返回的答案:', aiResponse);
 
     if (!aiResponse.questions || aiResponse.questions.length === 0) {
-      showStatus('AI 返回了空答案', 'error');
+      const firstFailure = aiResponse.failures?.[0];
+      const detail = firstFailure ? `，首个错误：题目 ${firstFailure.displayIndex} ${firstFailure.message}` : '';
+      showStatus(`AI 返回了空答案${detail}`, 'error');
       return;
     }
 
@@ -142,14 +150,28 @@ function getConfigFromPanel(): ExamConfig {
   const activeTab = $('.ai-tab-btn.active');
   const provider = (activeTab.data('provider') as ExamConfig['provider']) || 'openai';
   const getValue = (selector: string): string => String($(selector).val() || '');
+  const providers: ExamConfig['providers'] = {
+    openai: {
+      modelName: getValue('#ai-model-name-openai') || DEFAULT_OPENAI_MODEL,
+      apiKey: getValue('#ai-api-key-openai'),
+      apiBaseUrl: getValue('#ai-base-url-openai') || DEFAULT_OPENAI_BASE_URL,
+    },
+    claude: {
+      modelName: getValue('#ai-model-name-claude') || DEFAULT_CLAUDE_MODEL,
+      apiKey: getValue('#ai-api-key-claude'),
+      apiBaseUrl: getValue('#ai-base-url-claude') || DEFAULT_CLAUDE_BASE_URL,
+    },
+  };
+  const activeProviderConfig = providers[provider];
 
   return {
     provider: provider,
-    modelName: getValue(`#ai-model-name-${provider}`),
-    apiKey: getValue(`#ai-api-key-${provider}`),
-    apiBaseUrl: getValue(`#ai-base-url-${provider}`),
+    modelName: activeProviderConfig.modelName,
+    apiKey: activeProviderConfig.apiKey,
+    apiBaseUrl: activeProviderConfig.apiBaseUrl,
     customPrompt: getValue('#ai-custom-prompt'),
     concurrency: parseInt(getValue('#ai-concurrency'), 10) || 3,
+    providers,
   };
 }
 
@@ -175,6 +197,28 @@ function showStatus(message: string, type: 'success' | 'error' | 'info'): void {
   }
 }
 
+function activateProviderTab(panel: JQuery<HTMLElement>, provider: ExamConfig['provider']): void {
+  panel.find('.ai-tab-btn').removeClass('active');
+  panel.find(`.ai-tab-btn[data-provider="${provider}"]`).addClass('active');
+  panel.find('.ai-config-content').hide();
+  panel.find(`.ai-config-content[data-provider="${provider}"]`).show();
+}
+
+function populatePanelValues(panel: JQuery<HTMLElement>, config: ExamConfig): void {
+  panel.find('#ai-model-name-openai').val(config.providers.openai.modelName || DEFAULT_OPENAI_MODEL);
+  panel.find('#ai-api-key-openai').val(config.providers.openai.apiKey);
+  panel.find('#ai-base-url-openai').val(config.providers.openai.apiBaseUrl || DEFAULT_OPENAI_BASE_URL);
+
+  panel.find('#ai-model-name-claude').val(config.providers.claude.modelName || DEFAULT_CLAUDE_MODEL);
+  panel.find('#ai-api-key-claude').val(config.providers.claude.apiKey);
+  panel.find('#ai-base-url-claude').val(config.providers.claude.apiBaseUrl || DEFAULT_CLAUDE_BASE_URL);
+
+  panel.find('#ai-custom-prompt').val(config.customPrompt || '');
+  panel.find('#ai-concurrency').val(String(config.concurrency || 3));
+
+  activateProviderTab(panel, config.provider === 'claude' ? 'claude' : 'openai');
+}
+
 function createAIExamPanel(): void {
   if ($('#ai-exam-panel').length > 0) {
     log('面板已存在');
@@ -182,6 +226,9 @@ function createAIExamPanel(): void {
   }
 
   const config = getExamConfig();
+  // FIXED: 配置值可能来自用户粘贴的脚本/API Key/提示词，不能直接插进 HTML 字符串。
+  //        未转义的引号和 `<div>` 会破坏面板 DOM，切换 Claude Tab 时表现为嵌套/重复卡片。
+  //        这里先创建静态模板，再用 .val() 写入表单值，避免配置内容参与 HTML 解析。
   const panel = $(`
     <div class="ouchn-panel download-panel" id="ai-exam-panel">
       <div class="ouchn-panel-header download-header">
@@ -197,49 +244,43 @@ function createAIExamPanel(): void {
         <div class="ai-config-content" data-provider="openai">
           <div class="ouchn-field">
             <label class="ouchn-label">模型名称</label>
-            <input type="text" class="ouchn-input" id="ai-model-name-openai" placeholder="gpt-4.1"
-                   value="${config.provider === 'openai' ? config.modelName : 'gpt-4.1'}">
+            <input type="text" class="ouchn-input" id="ai-model-name-openai" placeholder="gpt-4.1">
           </div>
           <div class="ouchn-field">
             <label class="ouchn-label">API Key</label>
-            <input type="password" class="ouchn-input" id="ai-api-key-openai" placeholder="sk-..."
-                   value="${config.provider === 'openai' ? config.apiKey : ''}">
+            <input type="password" class="ouchn-input" id="ai-api-key-openai" placeholder="sk-...">
           </div>
           <div class="ouchn-field">
             <label class="ouchn-label">Base URL</label>
-            <input type="text" class="ouchn-input" id="ai-base-url-openai" placeholder="https://api.openai.com/v1"
-                   value="${config.provider === 'openai' ? config.apiBaseUrl : 'https://api.openai.com/v1'}">
+            <input type="text" class="ouchn-input" id="ai-base-url-openai" placeholder="https://api.openai.com/v1">
           </div>
         </div>
 
         <div class="ai-config-content" data-provider="claude" style="display:none;">
           <div class="ouchn-field">
             <label class="ouchn-label">模型名称</label>
-            <input type="text" class="ouchn-input" id="ai-model-name-claude" placeholder="claude-sonnet-4-6"
-                   value="${config.provider === 'claude' ? config.modelName : 'claude-sonnet-4-6'}">
+            <input type="text" class="ouchn-input" id="ai-model-name-claude" placeholder="claude-sonnet-4-6">
           </div>
           <div class="ouchn-field">
             <label class="ouchn-label">API Key</label>
-            <input type="password" class="ouchn-input" id="ai-api-key-claude" placeholder="sk-ant-..."
-                   value="${config.provider === 'claude' ? config.apiKey : ''}">
+            <input type="password" class="ouchn-input" id="ai-api-key-claude" placeholder="sk-ant-...">
           </div>
           <div class="ouchn-field">
             <label class="ouchn-label">Base URL</label>
-            <input type="text" class="ouchn-input" id="ai-base-url-claude" placeholder="https://aigw.c5y.moe"
-                   value="${config.provider === 'claude' ? config.apiBaseUrl : 'https://aigw.c5y.moe'}">
+            <input type="text" class="ouchn-input" id="ai-base-url-claude" placeholder="https://api.anthropic.com">
           </div>
         </div>
 
         <div class="ouchn-field">
           <label class="ouchn-label">自定义提示词 (可选)</label>
           <textarea class="ouchn-textarea" id="ai-custom-prompt" rows="3"
-                    placeholder="例如: 这是C语言考试...">${config.customPrompt}</textarea>
+                    placeholder="例如: 这是C语言考试..."></textarea>
         </div>
 
         <div class="ouchn-input-row">
           <label class="ouchn-label">答题并发数</label>
           <input type="number" class="ouchn-input ouchn-input-sm" id="ai-concurrency"
-                 value="${config.concurrency || 3}" min="1" max="20">
+                 min="1" max="20">
         </div>
 
         <button class="ouchn-btn ouchn-btn-primary" id="start-ai-exam">开始 AI 答题</button>
@@ -253,19 +294,14 @@ function createAIExamPanel(): void {
   `);
 
   $('body').append(panel);
+  populatePanelValues(panel, config);
 
   // 绑定 Tab 切换事件
   panel.find('.ai-tab-btn').on('click', function () {
-    const provider = $(this).data('provider');
-    panel.find('.ai-tab-btn').removeClass('active');
-    $(this).addClass('active');
-    panel.find('.ai-config-content').hide();
-    panel.find(`.ai-config-content[data-provider="${provider}"]`).show();
+    const provider = $(this).data('provider') as ExamConfig['provider'];
+    if (provider !== 'openai' && provider !== 'claude') return;
+    activateProviderTab(panel, provider);
   });
-
-  if (config.provider === 'claude') {
-    panel.find('.ai-tab-btn[data-provider="claude"]').trigger('click');
-  }
 
   panel.find('.ouchn-panel-toggle').on('click', function () {
     const body = panel.find('.ouchn-panel-body');

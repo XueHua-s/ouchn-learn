@@ -36,6 +36,12 @@ type ClaudeTextContent = { type: 'text'; text: string };
 type ClaudeImageContent = { type: 'image'; source: { type: 'base64'; media_type: string; data: string } };
 type ClaudeUserContent = string | Array<ClaudeTextContent | ClaudeImageContent>;
 
+type ProviderFailure = {
+  questionIndex: number;
+  displayIndex: string;
+  message: string;
+};
+
 // ============================================================
 // Prompt 构建
 // ============================================================
@@ -138,6 +144,51 @@ function buildClaudeMessagesUrl(apiBaseUrl: string): string {
   return baseUrl.endsWith('/v1') ? `${baseUrl}/messages` : `${baseUrl}/v1/messages`;
 }
 
+function buildApiUrl(baseUrl: string, path: string): string {
+  return `${baseUrl.replace(/\/+$/, '')}${path}`;
+}
+
+function requestJson<T>(url: string, init: RequestInit): Promise<T> {
+  const gmRequest = globalThis.GM_xmlhttpRequest;
+  if (typeof gmRequest === 'function') {
+    return new Promise((resolve, reject) => {
+      gmRequest({
+        method: init.method === 'POST' ? 'POST' : 'GET',
+        url,
+        headers: init.headers as Record<string, string>,
+        data: typeof init.body === 'string' ? init.body : undefined,
+        responseType: 'json',
+        onload: (response) => {
+          if (response.status < 200 || response.status >= 300) {
+            const responseText = response.responseText || JSON.stringify(response.response || '');
+            reject(new Error(`${response.status}: ${responseText.substring(0, 300)}`));
+            return;
+          }
+          if (response.response !== null && response.response !== undefined) {
+            resolve(response.response as T);
+            return;
+          }
+          try {
+            resolve(JSON.parse(response.responseText) as T);
+          } catch (err) {
+            reject(err instanceof Error ? err : new Error(String(err)));
+          }
+        },
+        onerror: () => reject(new Error('网络请求失败')),
+        ontimeout: () => reject(new Error('网络请求超时')),
+      });
+    });
+  }
+
+  return fetch(url, init).then(async (response) => {
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`${response.status}: ${errorText.substring(0, 300)}`);
+    }
+    return (await response.json()) as T;
+  });
+}
+
 // ============================================================
 // API 调用（单次）
 // ============================================================
@@ -158,46 +209,40 @@ async function callOpenAI(config: ExamConfig, systemPrompt: string, userContent:
     requestBody.temperature = 0.3;
   }
 
-  const response = await fetch(`${config.apiBaseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.apiKey}` },
-    body: JSON.stringify(requestBody),
-  });
+  const data = await requestJson<{ choices?: Array<{ message?: { content?: string } }> }>(
+    buildApiUrl(config.apiBaseUrl, '/chat/completions'),
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.apiKey}` },
+      body: JSON.stringify(requestBody),
+    },
+  );
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`OpenAI ${response.status}: ${errorText.substring(0, 200)}`);
-  }
-
-  const data = await response.json();
   return data.choices?.[0]?.message?.content || '';
 }
 
 async function callClaude(config: ExamConfig, systemPrompt: string, userContent: ClaudeUserContent): Promise<string> {
   const content = Array.isArray(userContent) ? userContent : [{ type: 'text', text: userContent }];
-
-  const response = await fetch(buildClaudeMessagesUrl(config.apiBaseUrl), {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': config.apiKey,
-      'anthropic-version': '2023-06-01',
+  const data = await requestJson<{ content?: Array<{ type?: string; text?: string }> }>(
+    buildClaudeMessagesUrl(config.apiBaseUrl),
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': config.apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({
+        model: config.modelName,
+        system: systemPrompt,
+        messages: [{ role: 'user', content }],
+        temperature: 0.3,
+        max_tokens: 2048,
+      }),
     },
-    body: JSON.stringify({
-      model: config.modelName,
-      system: systemPrompt,
-      messages: [{ role: 'user', content }],
-      temperature: 0.3,
-      max_tokens: 2048,
-    }),
-  });
+  );
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Claude ${response.status}: ${errorText.substring(0, 200)}`);
-  }
-
-  const data = await response.json();
   return data.content?.find((part: { type?: string; text?: string }) => part.type === 'text')?.text || '';
 }
 
@@ -259,7 +304,7 @@ async function callSingleQuestion(
   q: Question,
   systemPrompt: string,
   stats: ExamStats,
-): Promise<{ index: number; answer: AnswerValue } | null> {
+): Promise<{ answer: { index: number; answer: AnswerValue } | null; failure?: ProviderFailure }> {
   const userPrompt = buildSingleQuestionPrompt(q, config.customPrompt);
 
   // 提取图片
@@ -307,10 +352,18 @@ async function callSingleQuestion(
       throw new Error(`不支持的 provider: ${config.provider}`);
     }
 
-    return parseSingleAnswer(rawContent, q.index, q.displayIndex);
+    return { answer: parseSingleAnswer(rawContent, q.index, q.displayIndex) };
   } catch (err) {
-    error(`题目 ${q.displayIndex} 请求失败:`, err instanceof Error ? err.message : err);
-    return null;
+    const message = err instanceof Error ? err.message : String(err);
+    error(`题目 ${q.displayIndex} 请求失败:`, message);
+    return {
+      answer: null,
+      failure: {
+        questionIndex: q.index,
+        displayIndex: q.displayIndex,
+        message,
+      },
+    };
   }
 }
 
@@ -349,10 +402,10 @@ export async function callProvider(
     ),
   );
 
-  // 收集成功的答案
-  const answers = results.filter((r): r is NonNullable<typeof r> => r !== null);
+  const answers = results.map((r) => r.answer).filter((r): r is NonNullable<typeof r> => r !== null);
+  const failures = results.map((r) => r.failure).filter((failure): failure is ProviderFailure => failure !== undefined);
 
   log(`AI 返回: ${answers.length}/${questions.length} 道有答案`);
 
-  return { questions: answers };
+  return { questions: answers, failures };
 }

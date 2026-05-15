@@ -12,12 +12,22 @@ export type QuestionType =
   | 'unknown';
 
 export interface ExamConfig {
+  /** 当前用于答题请求的 provider；modelName/apiKey/apiBaseUrl 始终镜像 providers[provider]。 */
   provider: 'openai' | 'claude';
   modelName: string;
   apiKey: string;
   apiBaseUrl: string;
   customPrompt: string;
   concurrency: number;
+  /** 两个 Tab 各自独立保存配置，避免切换 provider 时覆盖另一套输入。 */
+  providers: Record<
+    'openai' | 'claude',
+    {
+      modelName: string;
+      apiKey: string;
+      apiBaseUrl: string;
+    }
+  >;
 }
 
 export interface QuestionImage {
@@ -90,6 +100,11 @@ export interface AIResponse {
     index: number;
     type?: string;
     answer: AnswerValue;
+  }>;
+  failures?: Array<{
+    questionIndex: number;
+    displayIndex: string;
+    message: string;
   }>;
 }
 
