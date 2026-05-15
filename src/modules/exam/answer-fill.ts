@@ -2,7 +2,7 @@
  * 答案填写：将 AI 返回的答案写入页面 DOM
  */
 
-import type { QuestionType, Question, AIResponse, ExamStats } from '@/types/exam';
+import type { QuestionType, Question, AIResponse, ExamStats, AnswerValue } from '@/types/exam';
 import { log, warn, isValidAnswer } from '@/types/exam';
 import { findQuestionElement } from './question-extract';
 import { fillEditable, fillTextarea, writeWithVerify, waitForEditor } from './answer-write';
@@ -103,7 +103,8 @@ async function syncEssayFallbackEditors(
 /**
  * 填写选择题（单选、判断）
  */
-function fillChoiceQuestion(subjectEl: Element, question: Question, answer: string | string[]): boolean {
+function fillChoiceQuestion(subjectEl: Element, question: Question, answer: AnswerValue): boolean {
+  if (typeof answer === 'object' && !Array.isArray(answer)) return false;
   const answerLabel = typeof answer === 'string' ? answer.trim().toUpperCase() : '';
   if (!answerLabel) return false;
 
@@ -172,7 +173,8 @@ function fillChoiceQuestion(subjectEl: Element, question: Question, answer: stri
 /**
  * 填写多选题
  */
-function fillMultipleChoiceQuestion(subjectEl: Element, _question: Question, answer: string | string[]): boolean {
+function fillMultipleChoiceQuestion(subjectEl: Element, _question: Question, answer: AnswerValue): boolean {
+  if (typeof answer === 'object' && !Array.isArray(answer)) return false;
   const answerLabels = Array.isArray(answer)
     ? answer.map((a) => String(a).trim().toUpperCase())
     : typeof answer === 'string'
@@ -213,7 +215,7 @@ function fillMultipleChoiceQuestion(subjectEl: Element, _question: Question, ans
 /**
  * 填写填空题（支持多空）
  */
-async function fillBlankQuestion(subjectEl: Element, question: Question, answer: string | string[]): Promise<boolean> {
+async function fillBlankQuestion(subjectEl: Element, question: Question, answer: AnswerValue): Promise<boolean> {
   const editors = findAnswerEditors(subjectEl, 'fill_in_blank');
   if (editors.length === 0) {
     warn(`题目 ${question.displayIndex}: 未找到填空编辑器`);
@@ -250,7 +252,8 @@ async function fillBlankQuestion(subjectEl: Element, question: Question, answer:
 /**
  * 填写简答题（增强版：写入校验 + 重试 + 等待编辑器挂载）
  */
-async function fillEssayQuestion(subjectEl: Element, question: Question, answer: string | string[]): Promise<boolean> {
+async function fillEssayQuestion(subjectEl: Element, question: Question, answer: AnswerValue): Promise<boolean> {
+  if (typeof answer === 'object' && !Array.isArray(answer)) return false;
   const answerText = Array.isArray(answer) ? answer.join('\n') : String(answer);
   if (!answerText || !isValidAnswer(answerText)) {
     warn(`题目 ${question.displayIndex}: 答案无效，跳过填写`);
@@ -284,11 +287,7 @@ async function fillEssayQuestion(subjectEl: Element, question: Question, answer:
 /**
  * 对单道题填写答案
  */
-async function fillAnswerForQuestion(
-  question: Question,
-  answer: string | string[],
-  stats: ExamStats,
-): Promise<boolean> {
+async function fillAnswerForQuestion(question: Question, answer: AnswerValue, stats: ExamStats): Promise<boolean> {
   const subjectEl = findQuestionElement(question);
   if (!subjectEl) {
     warn(`题目 ${question.displayIndex}: 未找到 DOM 元素`);
@@ -335,7 +334,7 @@ async function fillAnswerForQuestion(
  * 批量填写所有答案
  */
 export async function fillAnswers(questions: Question[], aiResponse: AIResponse, stats: ExamStats): Promise<void> {
-  const answerMap = new Map<number, string | string[]>();
+  const answerMap = new Map<number, AnswerValue>();
   aiResponse.questions.forEach((a) => {
     answerMap.set(a.index, a.answer);
   });

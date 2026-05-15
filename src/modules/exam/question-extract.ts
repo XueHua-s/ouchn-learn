@@ -175,6 +175,80 @@ function extractChoiceOptions(element: Element): NonNullable<Question['options']
   return options;
 }
 
+function cleanMatchingText(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+function extractVueWrapperPrimaryText(element: Element): string {
+  const directText = Array.from(element.childNodes)
+    .filter((node) => node.nodeType === Node.TEXT_NODE)
+    .map((node) => node.textContent || '')
+    .join(' ')
+    .trim();
+  if (directText) return cleanMatchingText(directText);
+
+  const firstLeaf = Array.from(element.querySelectorAll('span, p, [data-v-5512d720]')).find((node) => {
+    const text = cleanMatchingText(node.textContent || '');
+    return text.length > 0 && text.length < 120 && !node.querySelector('span, p');
+  });
+  return cleanMatchingText(firstLeaf?.textContent || element.textContent || '');
+}
+
+function getMatchingPanelText(panel: Element): string {
+  const contentCenter = panel.querySelector('.content-center');
+  if (contentCenter) return extractVueWrapperPrimaryText(contentCenter);
+  return cleanMatchingText(panel.textContent || '');
+}
+
+function extractMatchingQuestionData(element: Element): {
+  items: NonNullable<Question['matchingItems']>;
+  options: NonNullable<Question['matchingOptions']>;
+} {
+  const items: NonNullable<Question['matchingItems']> = [];
+  const options: NonNullable<Question['matchingOptions']> = [];
+
+  const rows = Array.from(element.querySelectorAll('.matching-answer-box > ul > li')).filter(
+    (row) => row.querySelector('[drag-type="to"]') && row.querySelector('.list-panel:not(.option):not(.panel-desc)'),
+  );
+
+  rows.forEach((row, idx) => {
+    const stemPanel = row.querySelector('.list-panel:not(.option):not(.panel-desc)');
+    const stem = stemPanel ? getMatchingPanelText(stemPanel) : '';
+    if (stem) {
+      items.push({ key: String(idx + 1), stem, poolLabel: '' });
+    }
+  });
+
+  const poolElements = Array.from(
+    element.querySelectorAll(
+      '.answer-pool .clone-area.drag-area[data-option-id], .answer-pool .clone-area.drag-area, ' +
+        '.match-item-right, .answer-pool-item, .match-target, [dnd-list] > *, .drag-item',
+    ),
+  );
+
+  const seenOptions = new Set<string>();
+  poolElements.forEach((poolEl, idx) => {
+    const content = getMatchingPanelText(poolEl);
+    if (!content || seenOptions.has(content)) return;
+    seenOptions.add(content);
+
+    const optionId = poolEl.getAttribute('data-option-id') || '';
+    const label = optionId || String.fromCharCode(65 + options.length);
+    options.push({ label, content, value: optionId || String(idx + 1) });
+  });
+
+  if (items.length === 0) {
+    const qText = element.textContent || '';
+    const circledNums = qText.match(/[①②③④⑤⑥⑦⑧⑨⑩][^①②③④⑤⑥⑦⑧⑨⑩\n]*/g);
+    circledNums?.forEach((seg, idx) => {
+      const text = cleanMatchingText(seg);
+      if (text.length > 1) items.push({ key: String(idx + 1), stem: text, poolLabel: '' });
+    });
+  }
+
+  return { items, options };
+}
+
 function extractAnalysisSubQuestions(parentElement: Element, parentIndex: number, sectionTitle: string): Question[] {
   const parentDescEl = parentElement.querySelector(SUBJECT_DESCRIPTION_SELECTOR);
   const rawParentDescription = parentDescEl?.textContent?.trim() || '';
@@ -355,32 +429,14 @@ export function extractQuestions(): Question[] {
 
     // 匹配题：提取左侧题干项和答案池
     if (question.type === 'matching') {
-      const matchingItems: Array<{ stem: string; poolLabel: string }> = [];
-      const qText = element.textContent || '';
-
-      // 通过 ①②③ 序号提取题干项
-      const circledNums = qText.match(/[①②③④⑤⑥⑦⑧⑨⑩][^①②③④⑤⑥⑦⑧⑨⑩\n]*/g);
-      if (circledNums) {
-        circledNums.forEach((seg) => {
-          const text = seg.trim();
-          if (text.length > 1) matchingItems.push({ stem: text, poolLabel: '' });
-        });
-      }
-
-      // 提取答案池选项
-      const poolLabels: string[] = [];
-      const poolElements = element.querySelectorAll(
-        '.match-item-right, .answer-pool-item, .match-target, [dnd-list] > *, .drag-item',
-      );
-      poolElements.forEach((poolEl) => {
-        const text = poolEl.textContent?.trim() || '';
-        if (text && text.length > 1) poolLabels.push(text);
-      });
+      const { items: matchingItems, options: matchingOptions } = extractMatchingQuestionData(element);
 
       question.matchingItems = matchingItems;
+      question.matchingOptions = matchingOptions;
       question.modelHints.push(
-        `匹配题：左侧有 ${matchingItems.length} 项，答案池有 ${poolLabels.length} 个选项`,
-        `答案池: ${poolLabels.join(' | ')}`,
+        `匹配题：左侧有 ${matchingItems.length} 项，答案池有 ${matchingOptions.length} 个选项`,
+        `左侧词汇: ${matchingItems.map((item) => `${item.key}. ${item.stem}`).join(' | ')}`,
+        `答案池: ${matchingOptions.map((option) => `${option.label}: ${option.content}`).join(' | ')}`,
       );
     }
 
