@@ -3,7 +3,7 @@
  */
 
 import pLimit from 'p-limit';
-import type { ExamConfig, Question, AIResponse, ExamStats } from '@/types/exam';
+import type { ExamConfig, Question, AIResponse, ExamStats, AnswerValue } from '@/types/exam';
 import { REASONING_MODEL_RE, log, warn, error, isValidAnswer } from '@/types/exam';
 import { resolveImageBase64, sanitizeImageDataUri } from './question-detect';
 import { findQuestionElement } from './question-extract';
@@ -25,7 +25,7 @@ function buildSystemPrompt(): string {
 7. 含图片时结合图片内容判断。图片不可见则尽力根据文本推断。
 8. 不要编造图片细节。保持 index 与输入一致。
 9. 无法确定也必须给出最合理结果，不要返回空答案。
-10. 匹配题 answer 返回 JSON 对象，key 是左侧题干标识(如"①")，value 是对应的右侧答案标签(如"A"或"F")。
+10. 匹配题 answer 返回 JSON 对象，key 是左侧题干标识或词汇(如"1"、"①"、"cigarette")，value 是对应的右侧答案池内容或标签(如"香烟"或"A")。
 
 输出格式：
 { "index": 1, "type": "single_selection", "answer": "C" }`;
@@ -52,8 +52,9 @@ function buildSingleQuestionPrompt(q: Question, customPrompt: string): string {
     item.note = `此题有${q.blankCount}个空位，请返回长度为${q.blankCount}的字符串数组`;
   }
   if (q.matchingItems && q.matchingItems.length > 0) {
-    item.matchingItems = q.matchingItems.map((m) => m.stem);
-    item.note = '匹配题：请返回 JSON 对象，key 是左侧标识(如①)，value 是对应的右侧答案标签';
+    item.matchingItems = q.matchingItems.map((m) => `${m.key}. ${m.stem}`);
+    item.matchingOptions = q.matchingOptions?.map((o) => `${o.label}: ${o.content}`) || [];
+    item.note = '匹配题：请返回 JSON 对象，key 用左侧编号或词汇，value 用右侧答案池内容或标签';
   }
   if (q.modelHints.length > 0) {
     item.hints = q.modelHints;
@@ -179,7 +180,7 @@ function parseSingleAnswer(
   rawContent: string,
   expectedIndex: number,
   displayIndex: string,
-): { index: number; answer: string | string[] } | null {
+): { index: number; answer: AnswerValue } | null {
   let content = rawContent.trim();
 
   // 移除 markdown code fence
@@ -228,7 +229,7 @@ async function callSingleQuestion(
   q: Question,
   systemPrompt: string,
   stats: ExamStats,
-): Promise<{ index: number; answer: string | string[] } | null> {
+): Promise<{ index: number; answer: AnswerValue } | null> {
   const userPrompt = buildSingleQuestionPrompt(q, config.customPrompt);
 
   // 提取图片

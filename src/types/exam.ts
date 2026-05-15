@@ -27,6 +27,10 @@ export interface QuestionImage {
   base64?: string;
 }
 
+export type MatchingAnswer = Record<string, string>;
+
+export type AnswerValue = string | string[] | MatchingAnswer;
+
 /**
  * 综合题子题号编码倍数。
  * FIXED: 用整数 `parentIndex * SUB_INDEX_MULTIPLIER + subIndex` 编码子题 index，
@@ -76,14 +80,16 @@ export interface Question {
   rawTypeText: string;
   modelHints: string[];
   /** 匹配题专用：左侧题干项 */
-  matchingItems?: Array<{ stem: string; poolLabel: string }>;
+  matchingItems?: Array<{ key: string; stem: string; poolLabel: string }>;
+  /** 匹配题专用：右侧答案池 */
+  matchingOptions?: Array<{ label: string; content: string; value: string }>;
 }
 
 export interface AIResponse {
   questions: Array<{
     index: number;
     type?: string;
-    answer: string | string[];
+    answer: AnswerValue;
   }>;
 }
 
@@ -158,7 +164,10 @@ const INVALID_ANSWER_PATTERNS = [
 ];
 
 /** 判断 AI 返回的答案是否有效（非空、非占位文本） */
-export function isValidAnswer(answer: string | string[]): boolean {
+export function isValidAnswer(answer: AnswerValue): boolean {
+  if (answer && typeof answer === 'object' && !Array.isArray(answer)) {
+    return Object.keys(answer).length > 0 && Object.values(answer).some((v) => isValidAnswer(String(v)));
+  }
   if (Array.isArray(answer)) {
     return answer.length > 0 && answer.some((a) => isValidAnswer(a));
   }
