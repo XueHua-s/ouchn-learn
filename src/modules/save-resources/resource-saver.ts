@@ -5,6 +5,16 @@
 import type { ResourceItem } from '@/types';
 import { waitForDOMStable } from './tree-scanner';
 
+type Html2Canvas = (element: HTMLElement, options?: Record<string, unknown>) => Promise<HTMLCanvasElement>;
+
+type JsPdfInstance = {
+  addImage: (imageData: string, format: string, x: number, y: number, width: number, height: number) => void;
+  addPage: () => void;
+  save: (filename: string) => void;
+};
+
+type JsPdfConstructor = new (orientation: string, unit: string, format: string) => JsPdfInstance;
+
 // ============================================================
 // 文件名 / 下载辅助
 // ============================================================
@@ -183,8 +193,12 @@ async function saveDocumentResource(title: string, statusCallback?: (message: st
   await waitForDOMStable(1500);
 
   try {
-    const jsPDF = (window as any).jspdf?.jsPDF;
-    const html2canvas = (window as any).html2canvas;
+    const win = window as Window & {
+      jspdf?: { jsPDF?: JsPdfConstructor };
+      html2canvas?: Html2Canvas;
+    };
+    const jsPDF = win.jspdf?.jsPDF;
+    const html2canvas = win.html2canvas;
 
     if (!jsPDF || !html2canvas) {
       throw new Error('PDF生成库未加载，请刷新页面重试');

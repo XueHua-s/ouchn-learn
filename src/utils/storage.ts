@@ -135,6 +135,11 @@ export function getExamConfig(): ExamConfig {
     if (stored) {
       const config = JSON.parse(stored);
       if (!config.provider) config.provider = 'openai';
+      if (config.provider === 'gemini') {
+        config.provider = 'claude';
+        config.modelName = 'claude-sonnet-4-6';
+        config.apiBaseUrl = 'https://aigw.c5y.moe';
+      }
       if (!config.concurrency || config.concurrency < 1) config.concurrency = 3;
       return config;
     }

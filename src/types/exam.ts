@@ -12,7 +12,7 @@ export type QuestionType =
   | 'unknown';
 
 export interface ExamConfig {
-  provider: 'openai' | 'gemini';
+  provider: 'openai' | 'claude';
   modelName: string;
   apiKey: string;
   apiBaseUrl: string;
@@ -183,14 +183,14 @@ export const REASONING_MODEL_RE = /^(o1|o1-mini|o1-preview|o3|o3-mini|o3-pro|o4-
 // 日志工具
 // ============================================================
 
-export function log(...args: any[]) {
+export function log(...args: unknown[]) {
   console.log(LOG_PREFIX, ...args);
 }
 
-export function warn(...args: any[]) {
+export function warn(...args: unknown[]) {
   console.warn(LOG_PREFIX, ...args);
 }
 
-export function error(...args: any[]) {
+export function error(...args: unknown[]) {
   console.error(LOG_PREFIX, ...args);
 }

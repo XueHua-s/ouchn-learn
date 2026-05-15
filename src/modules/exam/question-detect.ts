@@ -5,6 +5,8 @@
 import type { QuestionType, QuestionImage } from '@/types/exam';
 import { TYPE_TEXT_MAP, TYPE_CLASS_MAP, warn } from '@/types/exam';
 
+type Html2Canvas = (element: Element, options?: Record<string, unknown>) => Promise<HTMLCanvasElement>;
+
 // ============================================================
 // 题型检测
 // ============================================================
@@ -241,7 +243,7 @@ async function convertDataUriViaCanvas(dataUri: string): Promise<string | null> 
  */
 async function captureQuestionImage(element: Element): Promise<string | null> {
   try {
-    const html2canvas = (window as any).html2canvas;
+    const html2canvas = (window as Window & { html2canvas?: Html2Canvas }).html2canvas;
     if (!html2canvas) {
       warn('html2canvas 不可用，无法截图');
       return null;

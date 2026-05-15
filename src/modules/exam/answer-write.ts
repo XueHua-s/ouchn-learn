@@ -4,18 +4,35 @@
 
 import { warn } from '@/types/exam';
 
+type AngularNgModelController = {
+  $setViewValue?: (value: string) => void;
+  $render?: () => void;
+};
+
+type AngularElement = {
+  controller: (name: string) => AngularNgModelController | undefined;
+  scope?: () => { $apply?: () => void } | undefined;
+};
+
+type AngularGlobal = {
+  element: (el: HTMLElement) => AngularElement;
+};
+
 /** 触发 AngularJS $setViewValue + $apply */
 export function triggerAngularUpdate(el: HTMLElement, value: string): void {
   try {
-    const ng = (window as any).angular;
+    const ng = (window as Window & { angular?: AngularGlobal }).angular;
     if (!ng) return;
     const ngEl = ng.element(el);
-    const ctrl = ngEl.controller?.('ngModel');
+    const ctrl = ngEl.controller('ngModel');
     if (ctrl?.$setViewValue) {
       ctrl.$setViewValue(value);
       ctrl.$render?.();
     }
-    ngEl.scope()?.$apply?.();
+    const scope = ngEl.scope?.();
+    if (scope?.$apply) {
+      scope.$apply();
+    }
   } catch {
     // 忽略
   }
@@ -48,7 +65,9 @@ export function fillEditable(el: HTMLElement, text: string): void {
 }
 
 /** 向 textarea 填入文本（使用原生 value setter 确保框架检测） */
-export function fillTextarea(el: HTMLTextAreaElement, text: string): void {
+export function fillTextarea(el: HTMLElement, text: string): void {
+  if (!(el instanceof HTMLTextAreaElement)) return;
+
   el.focus();
 
   // 原生 setter 绕过框架拦截
@@ -82,7 +101,7 @@ function readBackValue(el: HTMLElement): string {
 export async function writeWithVerify(
   el: HTMLElement,
   text: string,
-  writeFn: (el: any, text: string) => void,
+  writeFn: (el: HTMLElement, text: string) => void,
 ): Promise<boolean> {
   // 写入一次
   writeFn(el, text);

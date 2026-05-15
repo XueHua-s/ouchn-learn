@@ -8,6 +8,34 @@ import { REASONING_MODEL_RE, log, warn, error, isValidAnswer } from '@/types/exa
 import { resolveImageBase64, sanitizeImageDataUri } from './question-detect';
 import { findQuestionElement } from './question-extract';
 
+type PromptQuestionItem = {
+  index: string;
+  type: Question['type'];
+  section: string;
+  score: string;
+  question: string;
+  options?: string[];
+  blankCount?: number;
+  note?: string;
+  matchingItems?: string[];
+  matchingOptions?: string[];
+  hints?: string[];
+};
+
+type OpenAITextContent = { type: 'text'; text: string };
+type OpenAIImageContent = { type: 'image_url'; image_url: { url: string; detail: 'high' } };
+type OpenAIUserContent = string | Array<OpenAITextContent | OpenAIImageContent>;
+type OpenAIMessage = { role: 'developer' | 'system' | 'user'; content: OpenAIUserContent };
+type OpenAIRequestBody = {
+  model: string;
+  messages: OpenAIMessage[];
+  temperature?: number;
+};
+
+type ClaudeTextContent = { type: 'text'; text: string };
+type ClaudeImageContent = { type: 'image'; source: { type: 'base64'; media_type: string; data: string } };
+type ClaudeUserContent = string | Array<ClaudeTextContent | ClaudeImageContent>;
+
 // ============================================================
 // Prompt 构建
 // ============================================================
@@ -36,7 +64,7 @@ function buildSingleQuestionPrompt(q: Question, customPrompt: string): string {
   const questionText = q.description.length > 10 ? q.description : q.rawText.substring(0, 2000);
   // FIXED: 给 AI 看的是 displayIndex（"21" 或 "21.3"），AI 友好；
   //        我们仅用 q.index（整数）做内部 round-trip，AI 返回的 index 我们也不信任。
-  const item: Record<string, any> = {
+  const item: PromptQuestionItem = {
     index: q.displayIndex,
     type: q.type,
     section: q.sectionTitle,
@@ -76,8 +104,8 @@ function buildSingleQuestionPrompt(q: Question, customPrompt: string): string {
 function buildOpenAIVisionContent(
   textContent: string,
   imageBase64List: string[],
-): Array<{ type: string; text?: string; image_url?: { url: string; detail: string } }> {
-  const parts: Array<{ type: string; text?: string; image_url?: { url: string; detail: string } }> = [];
+): Array<OpenAITextContent | OpenAIImageContent> {
+  const parts: Array<OpenAITextContent | OpenAIImageContent> = [];
   parts.push({ type: 'text', text: textContent });
   imageBase64List.forEach((b64) => {
     const safeUri = sanitizeImageDataUri(b64);
@@ -88,34 +116,35 @@ function buildOpenAIVisionContent(
   return parts;
 }
 
-function buildGeminiVisionParts(
+function buildClaudeVisionContent(
   textContent: string,
   imageBase64List: string[],
-): Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> {
-  const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [];
-  parts.push({ text: textContent });
+): Array<ClaudeTextContent | ClaudeImageContent> {
+  const parts: Array<ClaudeTextContent | ClaudeImageContent> = [];
+  parts.push({ type: 'text', text: textContent });
   imageBase64List.forEach((b64) => {
     const safeUri = sanitizeImageDataUri(b64);
     if (!safeUri) return;
     const match = safeUri.match(/^data:(image\/[^;]+);base64,(.+)$/s);
     if (match) {
-      parts.push({ inlineData: { mimeType: match[1], data: match[2] } });
+      parts.push({ type: 'image', source: { type: 'base64', media_type: match[1], data: match[2] } });
     }
   });
   return parts;
+}
+
+function buildClaudeMessagesUrl(apiBaseUrl: string): string {
+  const baseUrl = apiBaseUrl.replace(/\/+$/, '');
+  return baseUrl.endsWith('/v1') ? `${baseUrl}/messages` : `${baseUrl}/v1/messages`;
 }
 
 // ============================================================
 // API 调用（单次）
 // ============================================================
 
-async function callOpenAI(
-  config: ExamConfig,
-  systemPrompt: string,
-  userContent: string | Array<{ type: string; text?: string; image_url?: { url: string; detail: string } }>,
-): Promise<string> {
+async function callOpenAI(config: ExamConfig, systemPrompt: string, userContent: OpenAIUserContent): Promise<string> {
   const isReasoningModel = REASONING_MODEL_RE.test(config.modelName);
-  const messages: any[] = [];
+  const messages: OpenAIMessage[] = [];
 
   if (isReasoningModel) {
     messages.push({ role: 'developer', content: systemPrompt });
@@ -124,7 +153,7 @@ async function callOpenAI(
   }
   messages.push({ role: 'user', content: userContent });
 
-  const requestBody: any = { model: config.modelName, messages };
+  const requestBody: OpenAIRequestBody = { model: config.modelName, messages };
   if (!isReasoningModel) {
     requestBody.temperature = 0.3;
   }
@@ -144,31 +173,32 @@ async function callOpenAI(
   return data.choices?.[0]?.message?.content || '';
 }
 
-async function callGemini(
-  config: ExamConfig,
-  systemPrompt: string,
-  userContent: string | Array<{ text?: string; inlineData?: { mimeType: string; data: string } }>,
-): Promise<string> {
-  const url = `${config.apiBaseUrl}/models/${config.modelName}:generateContent?key=${config.apiKey}`;
-  const parts = Array.isArray(userContent) ? userContent : [{ text: userContent }];
+async function callClaude(config: ExamConfig, systemPrompt: string, userContent: ClaudeUserContent): Promise<string> {
+  const content = Array.isArray(userContent) ? userContent : [{ type: 'text', text: userContent }];
 
-  const response = await fetch(url, {
+  const response = await fetch(buildClaudeMessagesUrl(config.apiBaseUrl), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': config.apiKey,
+      'anthropic-version': '2023-06-01',
+    },
     body: JSON.stringify({
-      systemInstruction: { parts: [{ text: systemPrompt }] },
-      contents: [{ role: 'user', parts }],
-      generationConfig: { temperature: 0.3 },
+      model: config.modelName,
+      system: systemPrompt,
+      messages: [{ role: 'user', content }],
+      temperature: 0.3,
+      max_tokens: 2048,
     }),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Gemini ${response.status}: ${errorText.substring(0, 200)}`);
+    throw new Error(`Claude ${response.status}: ${errorText.substring(0, 200)}`);
   }
 
   const data = await response.json();
-  return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  return data.content?.find((part: { type?: string; text?: string }) => part.type === 'text')?.text || '';
 }
 
 // ============================================================
@@ -266,12 +296,12 @@ async function callSingleQuestion(
       } else {
         rawContent = await callOpenAI(config, systemPrompt, userPrompt);
       }
-    } else if (config.provider === 'gemini') {
+    } else if (config.provider === 'claude') {
       if (useVision) {
-        const visionParts = buildGeminiVisionParts(userPrompt, imageBase64List);
-        rawContent = await callGemini(config, systemPrompt, visionParts);
+        const visionContent = buildClaudeVisionContent(userPrompt, imageBase64List);
+        rawContent = await callClaude(config, systemPrompt, visionContent);
       } else {
-        rawContent = await callGemini(config, systemPrompt, userPrompt);
+        rawContent = await callClaude(config, systemPrompt, userPrompt);
       }
     } else {
       throw new Error(`不支持的 provider: ${config.provider}`);

@@ -140,15 +140,16 @@ async function startAutoExam(config: ExamConfig): Promise<void> {
 
 function getConfigFromPanel(): ExamConfig {
   const activeTab = $('.ai-tab-btn.active');
-  const provider = (activeTab.data('provider') as 'openai' | 'gemini') || 'openai';
+  const provider = (activeTab.data('provider') as ExamConfig['provider']) || 'openai';
+  const getValue = (selector: string): string => String($(selector).val() || '');
 
   return {
     provider: provider,
-    modelName: ($(`#ai-model-name-${provider}`) as any).val() || '',
-    apiKey: ($(`#ai-api-key-${provider}`) as any).val() || '',
-    apiBaseUrl: ($(`#ai-base-url-${provider}`) as any).val() || '',
-    customPrompt: ($('#ai-custom-prompt') as any).val() || '',
-    concurrency: parseInt(($('#ai-concurrency') as any).val(), 10) || 3,
+    modelName: getValue(`#ai-model-name-${provider}`),
+    apiKey: getValue(`#ai-api-key-${provider}`),
+    apiBaseUrl: getValue(`#ai-base-url-${provider}`),
+    customPrompt: getValue('#ai-custom-prompt'),
+    concurrency: parseInt(getValue('#ai-concurrency'), 10) || 3,
   };
 }
 
@@ -190,7 +191,7 @@ function createAIExamPanel(): void {
       <div class="ouchn-panel-body">
         <div class="ouchn-tabs">
           <button class="ouchn-tab ai-tab-btn active" data-provider="openai">OpenAI</button>
-          <button class="ouchn-tab ai-tab-btn" data-provider="gemini">Gemini</button>
+          <button class="ouchn-tab ai-tab-btn" data-provider="claude">Claude</button>
         </div>
 
         <div class="ai-config-content" data-provider="openai">
@@ -211,21 +212,21 @@ function createAIExamPanel(): void {
           </div>
         </div>
 
-        <div class="ai-config-content" data-provider="gemini" style="display:none;">
+        <div class="ai-config-content" data-provider="claude" style="display:none;">
           <div class="ouchn-field">
             <label class="ouchn-label">模型名称</label>
-            <input type="text" class="ouchn-input" id="ai-model-name-gemini" placeholder="gemini-pro"
-                   value="${config.provider === 'gemini' ? config.modelName : 'gemini-pro'}">
+            <input type="text" class="ouchn-input" id="ai-model-name-claude" placeholder="claude-sonnet-4-6"
+                   value="${config.provider === 'claude' ? config.modelName : 'claude-sonnet-4-6'}">
           </div>
           <div class="ouchn-field">
             <label class="ouchn-label">API Key</label>
-            <input type="password" class="ouchn-input" id="ai-api-key-gemini" placeholder="AIza..."
-                   value="${config.provider === 'gemini' ? config.apiKey : ''}">
+            <input type="password" class="ouchn-input" id="ai-api-key-claude" placeholder="sk-ant-..."
+                   value="${config.provider === 'claude' ? config.apiKey : ''}">
           </div>
           <div class="ouchn-field">
             <label class="ouchn-label">Base URL</label>
-            <input type="text" class="ouchn-input" id="ai-base-url-gemini" placeholder="https://generativelanguage.googleapis.com/v1beta"
-                   value="${config.provider === 'gemini' ? config.apiBaseUrl : 'https://generativelanguage.googleapis.com/v1beta'}">
+            <input type="text" class="ouchn-input" id="ai-base-url-claude" placeholder="https://aigw.c5y.moe"
+                   value="${config.provider === 'claude' ? config.apiBaseUrl : 'https://aigw.c5y.moe'}">
           </div>
         </div>
 
@@ -262,8 +263,8 @@ function createAIExamPanel(): void {
     panel.find(`.ai-config-content[data-provider="${provider}"]`).show();
   });
 
-  if (config.provider === 'gemini') {
-    panel.find('.ai-tab-btn[data-provider="gemini"]').trigger('click');
+  if (config.provider === 'claude') {
+    panel.find('.ai-tab-btn[data-provider="claude"]').trigger('click');
   }
 
   panel.find('.ouchn-panel-toggle').on('click', function () {
