@@ -4,7 +4,7 @@
 
 import type { QuestionType, Question, AIResponse, ExamStats } from '@/types/exam';
 import { log, warn, isValidAnswer } from '@/types/exam';
-import { findSubjectElement } from './question-extract';
+import { findQuestionElement } from './question-extract';
 import { fillEditable, fillTextarea, writeWithVerify, waitForEditor } from './answer-write';
 import { fillMatchingQuestion } from './answer-match';
 
@@ -31,8 +31,14 @@ function findAnswerEditors(subjectEl: Element, type: QuestionType): HTMLElement[
   }
 
   if (type === 'short_answer' || type === 'unknown') {
-    const textareas = Array.from(subjectEl.querySelectorAll('textarea')) as HTMLElement[];
-    if (textareas.length > 0) return textareas;
+    const visibleEditors = (
+      Array.from(
+        subjectEl.querySelectorAll(
+          '.simditor-body[contenteditable="true"], .answer-area-container [contenteditable="true"], .answer-content [contenteditable="true"]',
+        ),
+      ) as HTMLElement[]
+    ).filter((el) => !el.closest('.subject-description'));
+    if (visibleEditors.length > 0) return visibleEditors;
 
     const answerArea = subjectEl.querySelector('.subject-operate, .subject-answer, .answer-area');
     if (answerArea) {
@@ -40,14 +46,38 @@ function findAnswerEditors(subjectEl: Element, type: QuestionType): HTMLElement[
       if (editables.length > 0) return editables;
     }
 
-    return (Array.from(subjectEl.querySelectorAll('[contenteditable="true"]')) as HTMLElement[]).filter((el) => {
-      if (el.closest('.subject-description')) return false;
-      if (el.offsetHeight < 20 && el.offsetWidth < 50) return false;
-      return true;
-    });
+    const editables = (Array.from(subjectEl.querySelectorAll('[contenteditable="true"]')) as HTMLElement[]).filter(
+      (el) => {
+        if (el.closest('.subject-description')) return false;
+        if (el.offsetHeight < 20 && el.offsetWidth < 50) return false;
+        return true;
+      },
+    );
+    if (editables.length > 0) return editables;
+
+    const textareas = Array.from(subjectEl.querySelectorAll('textarea')) as HTMLElement[];
+    if (textareas.length > 0) return textareas;
   }
 
   return [];
+}
+
+function syncEssayFallbackEditors(subjectEl: Element, primaryEditor: HTMLElement, answerText: string): void {
+  const fallbackEditors = Array.from(
+    subjectEl.querySelectorAll('textarea, .simditor-body[contenteditable="true"]'),
+  ) as HTMLElement[];
+
+  fallbackEditors.forEach((editor) => {
+    if (editor === primaryEditor) return;
+    if (editor.closest('.subject-description')) return;
+
+    if (editor instanceof HTMLTextAreaElement) {
+      fillTextarea(editor, answerText);
+      return;
+    }
+
+    fillEditable(editor, answerText);
+  });
 }
 
 /**
@@ -84,7 +114,7 @@ function fillChoiceQuestion(subjectEl: Element, question: Question, answer: stri
     return optText === cleanAnswer;
   });
 
-  if (!targetEl && question.type === 'true_or_false') {
+  if (!targetEl && (question.type === 'single_selection' || question.type === 'true_or_false')) {
     const rawAnswer = (typeof answer === 'string' ? answer : '').trim();
     targetEl = optionElements.find((optEl) => {
       const content = optEl.querySelector('.option-content')?.textContent?.trim() || '';
@@ -204,6 +234,7 @@ async function fillEssayQuestion(subjectEl: Element, question: Question, answer:
   const editor = editors[0];
   const writeFn = editor instanceof HTMLTextAreaElement ? fillTextarea : fillEditable;
   const verified = await writeWithVerify(editor, answerText, writeFn);
+  syncEssayFallbackEditors(subjectEl, editor, answerText);
   log(`题目 ${question.index}: 填入简答答案 (${answerText.length}字, verified=${verified})`);
   return true;
 }
@@ -218,7 +249,7 @@ async function fillAnswerForQuestion(
   answer: string | string[],
   stats: ExamStats,
 ): Promise<boolean> {
-  const subjectEl = findSubjectElement(question.index);
+  const subjectEl = findQuestionElement(question);
   if (!subjectEl) {
     warn(`题目 ${question.index}: 未找到 DOM 元素`);
     stats.fillFailedQuestions.push(question.index);

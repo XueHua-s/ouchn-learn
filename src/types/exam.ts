@@ -29,6 +29,10 @@ export interface QuestionImage {
 
 export interface Question {
   index: number;
+  /** 综合题展开后的小题会保留父题号，用于回填时重新定位嵌套 DOM */
+  parentIndex?: number;
+  /** 综合题展开后的小题序号，例如 21 题下的第 3 小题 */
+  subIndex?: number;
   type: QuestionType;
   sectionTitle: string;
   scoreText: string;

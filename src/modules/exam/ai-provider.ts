@@ -6,7 +6,7 @@ import pLimit from 'p-limit';
 import type { ExamConfig, Question, AIResponse, ExamStats } from '@/types/exam';
 import { REASONING_MODEL_RE, log, warn, error, isValidAnswer } from '@/types/exam';
 import { resolveImageBase64, sanitizeImageDataUri } from './question-detect';
-import { findSubjectElement } from './question-extract';
+import { findQuestionElement } from './question-extract';
 
 // ============================================================
 // Prompt 构建
@@ -230,7 +230,7 @@ async function callSingleQuestion(
   // 提取图片
   const imageBase64List: string[] = [];
   if (q.hasImage && q.images.length > 0) {
-    const subjectEl = findSubjectElement(q.index);
+    const subjectEl = findQuestionElement(q);
     if (subjectEl) {
       for (const img of q.images) {
         const base64 = await resolveImageBase64(img, subjectEl);
