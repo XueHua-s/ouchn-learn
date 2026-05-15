@@ -23,6 +23,7 @@ const CIRCLED_NUM_MAP: Record<string, string> = {
 type AngularScope = {
   $apply?: () => void;
   $evalAsync?: () => void;
+  $parent?: AngularScope;
   [key: string]: unknown;
 };
 
@@ -41,8 +42,15 @@ type MatchingSubSubjectLike = {
 type MatchingSubjectLike = {
   options?: MatchingOptionLike[];
   sub_subjects?: MatchingSubSubjectLike[];
+  unsaved?: boolean;
+  not_answered?: boolean;
   [key: string]: unknown;
 };
+
+type PageWindow = Window &
+  typeof globalThis & {
+    angular?: { element: (el: Element) => { scope?: () => AngularScope; isolateScope?: () => AngularScope } };
+  };
 
 function normalizeKey(k: string): string {
   const trimmed = k.trim();
@@ -111,11 +119,16 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object';
 }
 
+function getPageWindow(element?: Element): PageWindow {
+  const unsafeWin = (globalThis as unknown as { unsafeWindow?: PageWindow }).unsafeWindow;
+  return unsafeWin || (element?.ownerDocument.defaultView as PageWindow | null) || (window as unknown as PageWindow);
+}
+
 function getAngularScope(subjectEl: Element): AngularScope | null {
   try {
-    const ng = (window as unknown as { angular?: { element: (el: Element) => { scope?: () => AngularScope } } })
-      .angular;
-    return ng?.element(subjectEl).scope?.() || null;
+    const ng = getPageWindow(subjectEl).angular;
+    const wrapped = ng?.element(subjectEl);
+    return wrapped?.scope?.() || wrapped?.isolateScope?.() || null;
   } catch {
     return null;
   }
@@ -250,17 +263,21 @@ export async function fillMatchingQuestion(
   const resultC = await tryDragAndDrop(subjectEl, question.displayIndex, matchMap);
   if (resultC) return true;
 
-  // 策略 D：OUCHN 词意匹配 drag-cloneable 结构
-  const resultD = await tryOuchnCloneableDrag(subjectEl, question.displayIndex, matchMap);
+  // 策略 D：按坐标模拟真人鼠标拖拽
+  const resultD = await tryHumanLikeMouseDrag(subjectEl, question.displayIndex, matchMap);
   if (resultD) return true;
 
-  // 策略 E：点击式匹配（选项可点 + 槽位可点）
-  const resultE = await tryClickToMatch(subjectEl, question.displayIndex, matchMap);
+  // 策略 E：OUCHN 词意匹配 drag-cloneable 结构
+  const resultE = await tryOuchnCloneableDrag(subjectEl, question.displayIndex, matchMap);
   if (resultE) return true;
 
-  // 策略 F：隐藏 input/select
-  const resultF = await tryHiddenInputs(subjectEl, question.displayIndex, matchMap);
+  // 策略 F：点击式匹配（选项可点 + 槽位可点）
+  const resultF = await tryClickToMatch(subjectEl, question.displayIndex, matchMap);
   if (resultF) return true;
+
+  // 策略 G：隐藏 input/select
+  const resultG = await tryHiddenInputs(subjectEl, question.displayIndex, matchMap);
+  if (resultG) return true;
 
   // 所有策略失败
   const hasImages = subjectEl.querySelectorAll('img').length > 5;
@@ -383,6 +400,9 @@ async function tryOuchnAngularModel(
 
   if (filled === 0) return false;
 
+  subject.unsaved = true;
+  subject.not_answered = false;
+
   try {
     scope.$apply?.();
   } catch {
@@ -390,8 +410,26 @@ async function tryOuchnAngularModel(
   }
 
   subjectEl.dispatchEvent(new Event('change', { bubbles: true }));
+  callScopeFunction(scope, 'dragAddCallback', subject);
+  callScopeFunction(scope, 'onChangeSubmission', subject);
   log(`题目 ${question.displayIndex}: OUCHN Angular 匹配模型写入 ${filled} 项`);
   return true;
+}
+
+function callScopeFunction(scope: AngularScope, name: string, arg: MatchingSubjectLike): void {
+  let current: AngularScope | undefined = scope;
+  while (current) {
+    const fn = current[name];
+    if (typeof fn === 'function') {
+      try {
+        (fn as (value: MatchingSubjectLike) => void).call(current, arg);
+      } catch {
+        // ignore callback mismatch; model mutation is the primary write path.
+      }
+      return;
+    }
+    current = current.$parent;
+  }
 }
 
 /** 策略 B：拖拽 */
@@ -429,17 +467,19 @@ function getOuchnMatchingRows(subjectEl: Element): HTMLElement[] {
 }
 
 function createDragEvent(type: string, dataTransfer: DataTransfer): DragEvent | Event {
+  const pageWin = getPageWindow();
   try {
-    return new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer });
+    return new pageWin.DragEvent(type, { bubbles: true, cancelable: true, dataTransfer });
   } catch {
-    const event = new Event(type, { bubbles: true, cancelable: true });
+    const event = new pageWin.Event(type, { bubbles: true, cancelable: true });
     Object.defineProperty(event, 'dataTransfer', { value: dataTransfer });
     return event;
   }
 }
 
 function dispatchDragCloneable(source: HTMLElement, target: HTMLElement): boolean {
-  const dt = new DataTransfer();
+  const pageWin = getPageWindow(source);
+  const dt = new pageWin.DataTransfer();
   const events: Array<[HTMLElement, string]> = [
     [source, 'mousedown'],
     [source, 'dragstart'],
@@ -455,7 +495,7 @@ function dispatchDragCloneable(source: HTMLElement, target: HTMLElement): boolea
       if (type.startsWith('drag') || type === 'drop') {
         el.dispatchEvent(createDragEvent(type, dt));
       } else {
-        el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true }));
+        el.dispatchEvent(new pageWin.MouseEvent(type, { bubbles: true, cancelable: true }));
       }
     });
     return true;
@@ -467,7 +507,7 @@ function dispatchDragCloneable(source: HTMLElement, target: HTMLElement): boolea
 
 function dispatchStandardDrag(source: HTMLElement, target: HTMLElement): boolean {
   try {
-    const dt = new DataTransfer();
+    const dt = new (getPageWindow(source).DataTransfer)();
     source.dispatchEvent(createDragEvent('dragstart', dt));
     target.dispatchEvent(createDragEvent('dragenter', dt));
     target.dispatchEvent(createDragEvent('dragover', dt));
@@ -478,6 +518,101 @@ function dispatchStandardDrag(source: HTMLElement, target: HTMLElement): boolean
     warn('匹配题标准拖拽事件派发失败，已跳过拖拽兜底:', err);
     return false;
   }
+}
+
+function getElementCenter(el: HTMLElement): { x: number; y: number } {
+  const rect = el.getBoundingClientRect();
+  return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+}
+
+function dispatchPointerMouse(el: Element, type: string, x: number, y: number): void {
+  const pageWin = getPageWindow(el);
+  const init: MouseEventInit & PointerEventInit = {
+    bubbles: true,
+    cancelable: true,
+    clientX: x,
+    clientY: y,
+    screenX: x,
+    screenY: y,
+    button: 0,
+    buttons: type === 'mouseup' || type === 'pointerup' ? 0 : 1,
+    pointerId: 1,
+    pointerType: 'mouse',
+    isPrimary: true,
+  };
+
+  if (type.startsWith('pointer') && typeof pageWin.PointerEvent === 'function') {
+    el.dispatchEvent(new pageWin.PointerEvent(type, init));
+    return;
+  }
+  el.dispatchEvent(new pageWin.MouseEvent(type, init));
+}
+
+async function humanLikeDrag(source: HTMLElement, target: HTMLElement): Promise<boolean> {
+  try {
+    source.scrollIntoView({ block: 'center', inline: 'center' });
+    target.scrollIntoView({ block: 'center', inline: 'center' });
+    await new Promise((r) => setTimeout(r, 80));
+
+    const start = getElementCenter(source);
+    const end = getElementCenter(target);
+    const doc = source.ownerDocument;
+
+    dispatchPointerMouse(source, 'pointerdown', start.x, start.y);
+    dispatchPointerMouse(source, 'mousedown', start.x, start.y);
+    await new Promise((r) => setTimeout(r, 80));
+
+    const steps = 14;
+    for (let i = 1; i <= steps; i++) {
+      const ratio = i / steps;
+      const x = start.x + (end.x - start.x) * ratio;
+      const y = start.y + (end.y - start.y) * ratio;
+      const hover = doc.elementFromPoint(x, y) || target;
+      dispatchPointerMouse(hover, 'pointermove', x, y);
+      dispatchPointerMouse(hover, 'mousemove', x, y);
+      await new Promise((r) => setTimeout(r, 18));
+    }
+
+    dispatchPointerMouse(target, 'pointerup', end.x, end.y);
+    dispatchPointerMouse(target, 'mouseup', end.x, end.y);
+    dispatchPointerMouse(target, 'click', end.x, end.y);
+    return true;
+  } catch (err) {
+    warn('匹配题坐标拖拽失败，已跳过真人式拖拽兜底:', err);
+    return false;
+  }
+}
+
+async function tryHumanLikeMouseDrag(
+  subjectEl: Element,
+  qDisplay: string,
+  matchMap: Map<string, string>,
+): Promise<boolean> {
+  const rows = getOuchnMatchingRows(subjectEl);
+  const sources = Array.from(
+    subjectEl.querySelectorAll(
+      '.answer-pool .clone-area.drag-area[data-option-id], .answer-pool .clone-area.drag-area, [drag-type="from"] .clone-area',
+    ),
+  ) as HTMLElement[];
+
+  if (rows.length === 0 || sources.length === 0) return false;
+
+  let filled = 0;
+  for (const [slotKey, choiceVal] of matchMap) {
+    const row = rows[parseInt(slotKey, 10) - 1];
+    const target = row?.querySelector('[drag-type="to"]') as HTMLElement | null;
+    const source = sources.find(
+      (el) => textsMatch(getPrimaryText(el), choiceVal) || textsMatch(el.dataset.optionId || '', choiceVal),
+    );
+    if (!source || !target) continue;
+
+    const ok = await humanLikeDrag(source, target);
+    await new Promise((r) => setTimeout(r, 250));
+    if (ok) filled++;
+  }
+
+  if (filled > 0) log(`题目 ${qDisplay}: 坐标鼠标拖拽填入 ${filled} 项`);
+  return filled > 0;
 }
 
 async function tryOuchnCloneableDrag(
