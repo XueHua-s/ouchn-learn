@@ -36,6 +36,8 @@ type MatchingOptionLike = {
 type MatchingSubSubjectLike = {
   note?: MatchingOptionLike;
   answer_number?: string | number;
+  answeredOption?: string | number;
+  answer_option_ids?: Array<string | number>;
   [key: string]: unknown;
 };
 
@@ -395,6 +397,9 @@ async function tryOuchnAngularModel(
 
     subSubject.note = option;
     subSubject.answer_number = option.id;
+    subSubject.answeredOption = option.id;
+    subSubject.answer_option_ids = option.id === undefined ? [] : [option.id];
+    callScopeFunction(scope, 'onChangeSubmission', subSubject);
     filled++;
   }
 
