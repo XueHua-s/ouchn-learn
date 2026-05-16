@@ -1,0 +1,295 @@
+/**
+ * AI 答题工具执行器：负责 lookup、shape guard、语义校验、串行 DOM 执行和统计落账。
+ */
+
+import type { AIResponse, AnswerValue, ExamStats, Question } from '@/types/exam';
+import { log, warn } from '@/types/exam';
+import { findExamTool } from './tool-registry';
+import {
+  createToolError,
+  type AnswerMatchingPairs,
+  type ExamToolContext,
+  type ExamToolResult,
+  type ExamToolUse,
+  type ExamToolUseSource,
+} from './tool-contract';
+
+type ExamToolBatch = { isConcurrencySafe: boolean; toolUses: ExamToolUse[] };
+
+function answerToStringArray(answer: AnswerValue): string[] {
+  return Array.isArray(answer) ? answer.map(String) : [String(answer)];
+}
+
+function answerToMatchingPairs(answer: AnswerValue): AnswerMatchingPairs {
+  if (typeof answer === 'object' && answer !== null && !Array.isArray(answer)) return answer;
+  if (Array.isArray(answer)) return answer.map(String);
+  return String(answer);
+}
+
+function createToolUseId(source: ExamToolUseSource, question: Question): string {
+  return `${source}:${question.index}`;
+}
+
+function answerToToolUse(question: Question, answer: AnswerValue, source: ExamToolUseSource): ExamToolUse {
+  switch (question.type) {
+    case 'single_selection':
+    case 'true_or_false':
+      return {
+        id: createToolUseId(source, question),
+        tool: 'answer_choice',
+        input: { questionIndex: question.index, answer: String(answer) },
+        source,
+      };
+    case 'multiple_selection':
+      return {
+        id: createToolUseId(source, question),
+        tool: 'answer_multiple_choice',
+        input: { questionIndex: question.index, answers: answerToStringArray(answer) },
+        source,
+      };
+    case 'fill_in_blank':
+      return {
+        id: createToolUseId(source, question),
+        tool: 'answer_blank',
+        input: { questionIndex: question.index, answers: answerToStringArray(answer) },
+        source,
+      };
+    case 'matching':
+      return {
+        id: createToolUseId(source, question),
+        tool: 'answer_matching',
+        input: { questionIndex: question.index, pairs: answerToMatchingPairs(answer) },
+        source,
+      };
+    case 'short_answer':
+    case 'unknown':
+    default:
+      return {
+        id: createToolUseId(source, question),
+        tool: 'answer_essay',
+        input: { questionIndex: question.index, answer: answerToStringArray(answer).join('\n') },
+        source,
+      };
+  }
+}
+
+function withToolUseMetadata(result: ExamToolResult, toolUse: ExamToolUse, sequence: number): ExamToolResult {
+  return {
+    ...result,
+    metadata: {
+      toolUseId: toolUse.id,
+      source: toolUse.source,
+      sequence,
+    },
+  };
+}
+
+export function legacyAIResponseToToolUses(questions: Question[], aiResponse: AIResponse): ExamToolUse[] {
+  const answerMap = new Map<number, AnswerValue>();
+  aiResponse.questions.forEach((item) => answerMap.set(item.index, item.answer));
+  const toolUses: ExamToolUse[] = [];
+
+  questions.forEach((question) => {
+    const answer = answerMap.get(question.index);
+    if (answer === undefined || answer === null) return;
+    toolUses.push(answerToToolUse(question, answer, 'legacy-ai-response'));
+  });
+
+  return toolUses;
+}
+
+function buildToolContext(questions: Question[], stats: ExamStats, signal?: AbortSignal): ExamToolContext {
+  return {
+    questions,
+    questionByIndex: new Map(questions.map((question) => [question.index, question])),
+    stats,
+    signal,
+  };
+}
+
+function updateStatsFromToolResult(result: ExamToolResult, stats: ExamStats): void {
+  if (result.ok) {
+    stats.toolSucceededCount++;
+    stats.filledCount += result.filledCount;
+    log(`题目 ${result.questionIndex}: ${result.tool} 执行成功`);
+    return;
+  }
+
+  stats.toolFailedCount++;
+  stats.toolErrors.push({
+    tool: result.tool,
+    questionIndex: result.questionIndex,
+    code: result.code,
+    message: result.message,
+    retryable: result.retryable,
+    toolUseId: result.metadata?.toolUseId,
+    source: result.metadata?.source,
+  });
+
+  if (result.questionIndex !== undefined && !stats.fillFailedQuestions.includes(result.questionIndex)) {
+    stats.fillFailedQuestions.push(result.questionIndex);
+  }
+  warn(`${result.tool}: ${result.message} (${result.code}, retryable=${result.retryable})`);
+}
+
+async function runExamToolUse(
+  toolUse: ExamToolUse,
+  context: ExamToolContext,
+  sequence: number,
+): Promise<ExamToolResult> {
+  if (context.signal?.aborted) {
+    return withToolUseMetadata(
+      createToolError({
+        tool: toolUse.tool,
+        code: 'tool_execution_cancelled',
+        message: '工具执行已取消',
+        retryable: false,
+      }),
+      toolUse,
+      sequence,
+    );
+  }
+
+  const tool = findExamTool(toolUse.tool);
+  if (!tool) {
+    return withToolUseMetadata(
+      createToolError({
+        tool: 'unknown',
+        code: 'unknown_tool',
+        message: `未知答题工具: ${toolUse.tool}`,
+        retryable: true,
+      }),
+      toolUse,
+      sequence,
+    );
+  }
+
+  if (!tool.inputSchema(toolUse.input)) {
+    return withToolUseMetadata(
+      createToolError({
+        tool: tool.name,
+        code: 'invalid_tool_input',
+        message: `${tool.name} 输入结构无效: ${JSON.stringify(toolUse.input).substring(0, 200)}`,
+        retryable: true,
+      }),
+      toolUse,
+      sequence,
+    );
+  }
+
+  const validationError = tool.validateInput?.(toolUse.input, context);
+  if (validationError) return withToolUseMetadata(validationError, toolUse, sequence);
+
+  try {
+    return withToolUseMetadata(await tool.execute(toolUse.input, context), toolUse, sequence);
+  } catch (err) {
+    return withToolUseMetadata(
+      createToolError({
+        tool: tool.name,
+        code: 'dom_write_failed',
+        message: err instanceof Error ? err.message : String(err),
+        retryable: false,
+      }),
+      toolUse,
+      sequence,
+    );
+  }
+}
+
+function isToolUseConcurrencySafe(toolUse: ExamToolUse): boolean {
+  const tool = findExamTool(toolUse.tool);
+  if (!tool || !tool.inputSchema(toolUse.input)) return false;
+  try {
+    return Boolean(tool.isConcurrencySafe(toolUse.input));
+  } catch {
+    return false;
+  }
+}
+
+function partitionToolUses(toolUses: ExamToolUse[]): ExamToolBatch[] {
+  return toolUses.reduce<ExamToolBatch[]>((batches, toolUse) => {
+    const isConcurrencySafe = isToolUseConcurrencySafe(toolUse);
+    const currentBatch = batches[batches.length - 1];
+    if (isConcurrencySafe && currentBatch?.isConcurrencySafe) {
+      currentBatch.toolUses.push(toolUse);
+      return batches;
+    }
+    batches.push({ isConcurrencySafe, toolUses: [toolUse] });
+    return batches;
+  }, []);
+}
+
+async function runToolBatch(
+  batch: ExamToolBatch,
+  context: ExamToolContext,
+  sequenceByToolUse: Map<ExamToolUse, number>,
+): Promise<ExamToolResult[]> {
+  if (!batch.isConcurrencySafe) {
+    const results: ExamToolResult[] = [];
+    for (const toolUse of batch.toolUses) {
+      results.push(await runExamToolUse(toolUse, context, sequenceByToolUse.get(toolUse) || 0));
+    }
+    return results;
+  }
+
+  return Promise.all(
+    batch.toolUses.map((toolUse) => runExamToolUse(toolUse, context, sequenceByToolUse.get(toolUse) || 0)),
+  );
+}
+
+export async function runExamTools(
+  questions: Question[],
+  toolUses: ExamToolUse[],
+  stats: ExamStats,
+  signal?: AbortSignal,
+): Promise<ExamToolResult[]> {
+  const context = buildToolContext(questions, stats, signal);
+  const results: ExamToolResult[] = [];
+  const sequenceByToolUse = new Map(toolUses.map((toolUse, index) => [toolUse, index + 1]));
+
+  for (const batch of partitionToolUses(toolUses)) {
+    const batchResults = await runToolBatch(batch, context, sequenceByToolUse);
+    batchResults.forEach((result) => updateStatsFromToolResult(result, stats));
+    results.push(...batchResults);
+  }
+
+  return results;
+}
+
+export async function fillAnswersWithTools(
+  questions: Question[],
+  aiResponse: AIResponse,
+  stats: ExamStats,
+): Promise<ExamToolResult[]> {
+  const answerMap = new Map<number, AnswerValue>();
+  aiResponse.questions.forEach((answer) => answerMap.set(answer.index, answer.answer));
+
+  const aiIndexes = Array.from(answerMap.keys()).sort((a, b) => a - b);
+  const localIndexes = questions.map((question) => question.index).sort((a, b) => a - b);
+  if (aiResponse.questions.length !== questions.length) {
+    warn(
+      `AI 返回题数(${aiResponse.questions.length}) ≠ 本地题数(${questions.length})`,
+      '| AI:',
+      aiIndexes.join(','),
+      '| 本地:',
+      localIndexes.join(','),
+    );
+  }
+
+  const toolUses = legacyAIResponseToToolUses(questions, aiResponse);
+  const toolUseIndexes = new Set(
+    toolUses
+      .map((toolUse) => (typeof toolUse.input === 'object' && toolUse.input !== null ? toolUse.input : null))
+      .map((input) => (input && 'questionIndex' in input ? input.questionIndex : undefined))
+      .filter((index): index is number => typeof index === 'number'),
+  );
+
+  for (const question of questions) {
+    if (!toolUseIndexes.has(question.index)) {
+      stats.skippedQuestions.push(question.index);
+      warn(`题目 ${question.displayIndex}: AI 未返回答案，跳过`);
+    }
+  }
+
+  return runExamTools(questions, toolUses, stats);
+}

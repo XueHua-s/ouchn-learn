@@ -287,11 +287,10 @@ async function fillEssayQuestion(subjectEl: Element, question: Question, answer:
 /**
  * 对单道题填写答案
  */
-async function fillAnswerForQuestion(question: Question, answer: AnswerValue, stats: ExamStats): Promise<boolean> {
+export async function fillAnswerForQuestion(question: Question, answer: AnswerValue): Promise<boolean> {
   const subjectEl = findQuestionElement(question);
   if (!subjectEl) {
     warn(`题目 ${question.displayIndex}: 未找到 DOM 元素`);
-    stats.fillFailedQuestions.push(question.index);
     return false;
   }
 
@@ -320,13 +319,6 @@ async function fillAnswerForQuestion(question: Question, answer: AnswerValue, st
       break;
   }
 
-  if (success) {
-    stats.filledCount++;
-    log(`题目 ${question.displayIndex} (${question.type}): 填写成功`);
-  } else {
-    stats.fillFailedQuestions.push(question.index);
-    warn(`题目 ${question.displayIndex} (${question.type}): 填写失败`);
-  }
   return success;
 }
 
@@ -358,6 +350,13 @@ export async function fillAnswers(questions: Question[], aiResponse: AIResponse,
       warn(`题目 ${question.displayIndex}: AI 未返回答案，跳过`);
       continue;
     }
-    await fillAnswerForQuestion(question, answer, stats);
+    const success = await fillAnswerForQuestion(question, answer);
+    if (success) {
+      stats.filledCount++;
+      log(`题目 ${question.displayIndex} (${question.type}): 填写成功`);
+    } else {
+      stats.fillFailedQuestions.push(question.index);
+      warn(`题目 ${question.displayIndex} (${question.type}): 填写失败`);
+    }
   }
 }

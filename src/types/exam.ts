@@ -113,6 +113,17 @@ export interface ExamStats {
   extractedCount: number;
   aiReturnedCount: number;
   filledCount: number;
+  toolSucceededCount: number;
+  toolFailedCount: number;
+  toolErrors: Array<{
+    tool: string;
+    questionIndex?: number;
+    code: string;
+    message: string;
+    retryable: boolean;
+    toolUseId?: string;
+    source?: string;
+  }>;
   skippedQuestions: number[];
   fillFailedQuestions: number[];
   unknownTypeQuestions: number[];
