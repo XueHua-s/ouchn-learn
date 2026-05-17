@@ -7,6 +7,7 @@ import { log, warn } from '@/types/exam';
 import { findExamTool } from './tool-registry';
 import {
   createToolError,
+  previewUnknownInput,
   type AnswerMatchingPairs,
   type ExamToolContext,
   type ExamToolResult,
@@ -116,6 +117,7 @@ function updateStatsFromToolResult(result: ExamToolResult, stats: ExamStats): vo
   }
 
   stats.toolFailedCount++;
+  stats.toolFailuresByCode[result.code] = (stats.toolFailuresByCode[result.code] || 0) + 1;
   stats.toolErrors.push({
     tool: result.tool,
     questionIndex: result.questionIndex,
@@ -169,7 +171,7 @@ async function runExamToolUse(
       createToolError({
         tool: tool.name,
         code: 'invalid_tool_input',
-        message: `${tool.name} 输入结构无效: ${JSON.stringify(toolUse.input).substring(0, 200)}`,
+        message: `${tool.name} 输入结构无效: ${previewUnknownInput(toolUse.input)}`,
         retryable: true,
       }),
       toolUse,
@@ -243,6 +245,7 @@ export async function runExamTools(
   stats: ExamStats,
   signal?: AbortSignal,
 ): Promise<ExamToolResult[]> {
+  stats.toolCallCount += toolUses.length;
   const context = buildToolContext(questions, stats, signal);
   const results: ExamToolResult[] = [];
   const sequenceByToolUse = new Map(toolUses.map((toolUse, index) => [toolUse, index + 1]));

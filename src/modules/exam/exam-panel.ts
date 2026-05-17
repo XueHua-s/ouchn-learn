@@ -34,6 +34,7 @@ function printExamStats(stats: ExamStats, questions: Question[]): void {
     提取题目数: stats.extractedCount,
     'AI 返回题目数': stats.aiReturnedCount,
     成功填写数: stats.filledCount,
+    工具调用数: stats.toolCallCount,
     工具成功数: stats.toolSucceededCount,
     工具失败数: stats.toolFailedCount,
     '跳过 (AI未返回)': stats.skippedQuestions.length,
@@ -52,6 +53,7 @@ function printExamStats(stats: ExamStats, questions: Question[]): void {
   }
   if (stats.toolErrors.length > 0) {
     warn('工具执行错误:', stats.toolErrors);
+    warn('工具错误分类:', stats.toolFailuresByCode);
   }
   if (stats.unknownTypeQuestions.length > 0) {
     warn('未识别题型的题目:', toDisplayIndexes(stats.unknownTypeQuestions, questions).join(', '));
@@ -70,8 +72,10 @@ async function startAutoExam(config: ExamConfig): Promise<void> {
     extractedCount: 0,
     aiReturnedCount: 0,
     filledCount: 0,
+    toolCallCount: 0,
     toolSucceededCount: 0,
     toolFailedCount: 0,
+    toolFailuresByCode: {},
     toolErrors: [],
     skippedQuestions: [],
     fillFailedQuestions: [],

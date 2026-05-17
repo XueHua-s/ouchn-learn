@@ -159,8 +159,19 @@ export function buildExamTool<Input>(def: ExamToolDefinition<Input>): ExamTool<I
   };
 }
 
-export function createToolSuccess(tool: ExamToolName, questionIndex: number): ExamToolResult {
-  return { ok: true, tool, questionIndex, filledCount: 1, verified: true };
+export function createToolSuccess(
+  tool: ExamToolName,
+  questionIndex: number,
+  options: { filledCount?: number; verified?: boolean; warnings?: string[] } = {},
+): ExamToolResult {
+  return {
+    ok: true,
+    tool,
+    questionIndex,
+    filledCount: options.filledCount ?? 1,
+    verified: options.verified,
+    warnings: options.warnings,
+  };
 }
 
 export function createToolError(args: {
@@ -176,6 +187,16 @@ export function createToolError(args: {
 
 export function isRecord(input: unknown): input is Record<string, unknown> {
   return typeof input === 'object' && input !== null && !Array.isArray(input);
+}
+
+export function previewUnknownInput(input: unknown, maxLength = 200): string {
+  try {
+    const serialized = JSON.stringify(input);
+    if (serialized !== undefined) return serialized.substring(0, maxLength);
+  } catch {
+    // Fall through for circular or otherwise unserializable inputs.
+  }
+  return String(input).substring(0, maxLength);
 }
 
 export function isPositiveInteger(value: unknown): value is number {

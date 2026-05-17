@@ -102,6 +102,56 @@ function cleanOptionLabel(label: string): string {
     .toUpperCase();
 }
 
+function cleanMatchingText(text: string): string {
+  return text
+    .replace(/[\s\u00a0]+/g, '')
+    .replace(/[.、．:：;；,，()（）【】[\]]/g, '')
+    .toLowerCase();
+}
+
+function matchingTextMatches(candidate: string, expected: string): boolean {
+  const normalizedCandidate = cleanMatchingText(candidate);
+  const normalizedExpected = cleanMatchingText(expected);
+  if (!normalizedCandidate || !normalizedExpected) return false;
+  return (
+    normalizedCandidate === normalizedExpected ||
+    normalizedCandidate.includes(normalizedExpected) ||
+    normalizedExpected.includes(normalizedCandidate)
+  );
+}
+
+function parseMatchingEntries(answer: AnswerValue): Array<[string, string]> | null {
+  if (typeof answer === 'object' && answer !== null && !Array.isArray(answer)) {
+    return Object.entries(answer).map(([key, value]) => [key, String(value)]);
+  }
+
+  if (Array.isArray(answer)) return null;
+
+  const text = String(answer).trim();
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return Object.entries(parsed).map(([key, value]) => [key, String(value)]);
+    }
+    if (Array.isArray(parsed)) return null;
+  } catch {
+    // Not JSON; continue with loose textual pair parsing.
+  }
+
+  const entries: Array<[string, string]> = [];
+  for (const line of text.split(/[,，;；\n]+/)) {
+    const match = line.match(/(.+?)\s*[-=→>:：]+\s*(.+)/);
+    if (match) entries.push([match[1], match[2]]);
+  }
+  return entries;
+}
+
+function getMatchingAnswerValues(answer: AnswerValue, entries: Array<[string, string]> | null): string[] {
+  if (entries) return entries.map(([, value]) => value);
+  if (Array.isArray(answer)) return answer.map(String);
+  return [];
+}
+
 function validateChoiceAnswer(tool: ExamToolName, question: Question, answer: string): ExamToolResult | null {
   const rawAnswer = answer.trim();
   if (!rawAnswer || !isValidAnswer(rawAnswer)) {
@@ -177,6 +227,56 @@ function validateMatchingPairs(question: Question, answer: AnswerValue): ExamToo
   if (!isValidAnswer(answer)) {
     return invalidShape('answer_matching', question.index, `题目 ${question.displayIndex}: 匹配答案为空或无效`);
   }
+
+  const entries = parseMatchingEntries(answer);
+  if (entries && entries.length === 0) {
+    return createToolError({
+      tool: 'answer_matching',
+      questionIndex: question.index,
+      code: 'matching_pair_unresolved',
+      message: `题目 ${question.displayIndex}: 无法解析匹配关系`,
+      retryable: true,
+    });
+  }
+
+  if (entries && question.matchingItems?.length) {
+    const expectedKeys = new Set(question.matchingItems.map((item) => cleanMatchingText(item.key)));
+    for (const [key] of entries) {
+      const normalizedKey = cleanMatchingText(key);
+      const matchedKey = expectedKeys.has(normalizedKey);
+      const matchedStem = question.matchingItems.some((item) => matchingTextMatches(key, item.stem));
+      if (!matchedKey && !matchedStem) {
+        return createToolError({
+          tool: 'answer_matching',
+          questionIndex: question.index,
+          code: 'matching_pair_unresolved',
+          message: `题目 ${question.displayIndex}: 未识别匹配题左侧项 "${key}"`,
+          retryable: true,
+        });
+      }
+    }
+  }
+
+  const values = getMatchingAnswerValues(answer, entries);
+  if (values.length > 0 && question.matchingOptions?.length) {
+    const optionLabels = new Set(question.matchingOptions.map((option) => cleanMatchingText(option.label)));
+    const optionValues = new Set(question.matchingOptions.map((option) => cleanMatchingText(option.value)));
+    for (const value of values) {
+      const normalizedValue = cleanMatchingText(value);
+      const matchedLabel = optionLabels.has(normalizedValue) || optionValues.has(normalizedValue);
+      const matchedContent = question.matchingOptions.some((option) => matchingTextMatches(value, option.content));
+      if (!matchedLabel && !matchedContent) {
+        return createToolError({
+          tool: 'answer_matching',
+          questionIndex: question.index,
+          code: 'matching_pair_unresolved',
+          message: `题目 ${question.displayIndex}: 未识别匹配题右侧项 "${value}"`,
+          retryable: true,
+        });
+      }
+    }
+  }
+
   return null;
 }
 
