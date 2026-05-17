@@ -15,7 +15,6 @@ import {
   isAnswerEssayInput,
   isAnswerMatchingInput,
   isAnswerMultipleChoiceInput,
-  matchingPairsToAnswerValue,
   type AnswerBlankInput,
   type AnswerChoiceInput,
   type AnswerEssayInput,
@@ -26,16 +25,6 @@ import {
   type ExamToolName,
   type ExamToolResult,
 } from './tool-contract';
-
-export interface RunnableExamTool {
-  name: ExamToolName;
-  description: string;
-  inputSchema: (input: unknown) => boolean;
-  validateInput?: (input: unknown, context: ExamToolContext) => ExamToolResult | null;
-  isConcurrencySafe: (input: unknown) => boolean;
-  isReadOnly: (input: unknown) => boolean;
-  execute: (input: unknown, context: ExamToolContext) => Promise<ExamToolResult>;
-}
 
 function getQuestion(context: ExamToolContext, questionIndex: number): Question | null {
   return context.questionByIndex.get(questionIndex) || null;
@@ -396,59 +385,24 @@ const answerMatchingTool = buildExamTool<AnswerMatchingInput>({
     const typeError = validateQuestionType('answer_matching', context, input.questionIndex, ['matching'], 'matching');
     if (typeError) return typeError;
     const question = getQuestion(context, input.questionIndex);
-    return question ? validateMatchingPairs(question, matchingPairsToAnswerValue(input.pairs)) : null;
+    // AnswerMatchingPairs 与 AnswerValue 结构等价（见 tool-contract.ts），可直接传入。
+    return question ? validateMatchingPairs(question, input.pairs) : null;
   },
   async execute(input, context) {
     const question = getQuestion(context, input.questionIndex);
     if (!question) return questionNotFound('answer_matching', input.questionIndex);
-    return executeAnswer('answer_matching', question, matchingPairsToAnswerValue(input.pairs));
+    return executeAnswer('answer_matching', question, input.pairs);
   },
 });
 
-function toRunnableTool<Input>(tool: ExamTool<Input>): RunnableExamTool {
-  return {
-    name: tool.name,
-    description: tool.description,
-    inputSchema: tool.inputSchema,
-    validateInput(input, context) {
-      if (!tool.inputSchema(input)) {
-        return createToolError({
-          tool: tool.name,
-          code: 'invalid_tool_input',
-          message: `${tool.name} 输入结构无效`,
-          retryable: true,
-        });
-      }
-      return tool.validateInput?.(input, context) || null;
-    },
-    isConcurrencySafe(input) {
-      return tool.inputSchema(input) ? tool.isConcurrencySafe(input) : false;
-    },
-    isReadOnly(input) {
-      return tool.inputSchema(input) ? tool.isReadOnly(input) : false;
-    },
-    async execute(input, context) {
-      if (!tool.inputSchema(input)) {
-        return createToolError({
-          tool: tool.name,
-          code: 'invalid_tool_input',
-          message: `${tool.name} 输入结构无效`,
-          retryable: true,
-        });
-      }
-      return tool.execute(input, context);
-    },
-  };
-}
+export const EXAM_TOOLS: readonly ExamTool[] = [
+  answerChoiceTool,
+  answerMultipleChoiceTool,
+  answerBlankTool,
+  answerEssayTool,
+  answerMatchingTool,
+];
 
-export const EXAM_TOOLS = [
-  toRunnableTool(answerChoiceTool),
-  toRunnableTool(answerMultipleChoiceTool),
-  toRunnableTool(answerBlankTool),
-  toRunnableTool(answerEssayTool),
-  toRunnableTool(answerMatchingTool),
-] as const;
-
-export function findExamTool(name: string): RunnableExamTool | undefined {
+export function findExamTool(name: string): ExamTool | undefined {
   return EXAM_TOOLS.find((tool) => tool.name === name);
 }

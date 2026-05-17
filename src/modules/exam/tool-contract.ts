@@ -2,7 +2,7 @@
  * AI 答题工具协议：provider 只能表达受控答题意图，DOM 细节由本地工具层封装。
  */
 
-import type { AnswerValue, ExamStats, Question } from '@/types/exam';
+import type { ExamStats, Question } from '@/types/exam';
 
 export type ExamToolName =
   | 'answer_choice'
@@ -46,7 +46,16 @@ export interface AnswerEssayInput {
   answer: string;
 }
 
-export type AnswerMatchingPairs = Record<string, string> | Array<{ left: string; right: string }> | string | string[];
+/**
+ * 匹配题入参的合法形态：
+ * - Record：直接映射 stem → option label/value（最规范）。
+ * - string[]：按 matchingItems 的位置顺序排列的右侧 label/value（位置性）。
+ * - string：兜底纯文本，registry 会用 JSON.parse + "stem: value" 文本解析回退。
+ *
+ * 当前与 AnswerValue 结构等价（string | string[] | Record<string, string>），
+ * 因此可以直接传给底层 fillAnswerForQuestion / validateMatchingPairs 而无需转换。
+ */
+export type AnswerMatchingPairs = Record<string, string> | string | string[];
 
 export interface AnswerMatchingInput {
   questionIndex: number;
@@ -60,7 +69,11 @@ export type ExamToolInput =
   | AnswerEssayInput
   | AnswerMatchingInput;
 
-export type ExamToolUseSource = 'legacy-ai-response' | 'json-envelope' | 'native-tool';
+/**
+ * 工具调用来源。当前只有把 legacy AIResponse 翻译成工具意图这一条路径；
+ * 接入 provider 原生 tool calling 或 JSON envelope 时再扩展此 union，executor/stats 无需改动。
+ */
+export type ExamToolUseSource = 'legacy-ai-response';
 
 export interface ExamToolUse<Input = unknown> {
   id?: string;
@@ -69,12 +82,21 @@ export interface ExamToolUse<Input = unknown> {
   source: ExamToolUseSource;
 }
 
+/**
+ * 一次工具调用的诊断元数据。executor 在每个 ExamToolResult 上回填，
+ * 让上层 stats 能反查到调用 id（toolUseId）和路径（source）。
+ */
 export interface ExamToolRunMetadata {
   toolUseId?: string;
   source?: ExamToolUseSource;
-  sequence?: number;
 }
 
+/**
+ * 工具执行结果。
+ * - 成功路径必须带 questionIndex 和 filledCount（默认 1，由 createToolSuccess 保证）。
+ * - 失败路径必须带 ExamToolErrorCode + 可读 message + retryable 标志；
+ *   绝不把失败折叠成 boolean —— 失败原因要可被 provider 反馈和 stats 分类。
+ */
 export type ExamToolResult =
   | {
       ok: true;
@@ -96,6 +118,10 @@ export type ExamToolResult =
       metadata?: ExamToolRunMetadata;
     };
 
+/**
+ * 工具运行期需要的上下文：题目集合、按 index 的快速查找表、共享 stats、可选取消信号。
+ * 由 tool-executor 在每批调用前组装一次。
+ */
 export interface ExamToolContext {
   questions: Question[];
   questionByIndex: Map<number, Question>;
@@ -103,62 +129,54 @@ export interface ExamToolContext {
   signal?: AbortSignal;
 }
 
-export interface ExamTool<Input> {
+/**
+ * 工具的运行时契约。
+ * - inputSchema 是唯一允许从 unknown 收窄到 ExamToolInput 的 type guard。
+ * - executor 已经保证调 validateInput / execute 前输入通过了 inputSchema，
+ *   因此后两者不需要再做结构性检查。
+ * - isConcurrencySafe 默认 false（DOM 写入串行）；仅在纯读工具上作者可覆盖为 true。
+ */
+export interface ExamTool {
+  name: ExamToolName;
+  description: string;
+  inputSchema: (input: unknown) => input is ExamToolInput;
+  validateInput?: (input: ExamToolInput, context: ExamToolContext) => ExamToolResult | null;
+  isConcurrencySafe: (input: ExamToolInput) => boolean;
+  execute: (input: ExamToolInput, context: ExamToolContext) => Promise<ExamToolResult>;
+}
+
+/**
+ * 工具作者使用的类型化定义。
+ * 写出 inputSchema 后，validateInput/execute 内部的 input 会自动收窄为具体 Input，
+ * 然后由 buildExamTool 做一次类型擦除，存入 registry。
+ */
+export interface ExamToolDefinition<Input extends ExamToolInput> {
   name: ExamToolName;
   description: string;
   inputSchema: (input: unknown) => input is Input;
   validateInput?: (input: Input, context: ExamToolContext) => ExamToolResult | null;
-  isConcurrencySafe: (input: Input) => boolean;
-  isReadOnly: (input: Input) => boolean;
+  isConcurrencySafe?: (input: Input) => boolean;
   execute: (input: Input, context: ExamToolContext) => Promise<ExamToolResult>;
 }
 
-export type ExamToolDefinition<Input> = Omit<ExamTool<Input>, 'isConcurrencySafe' | 'isReadOnly'> &
-  Partial<Pick<ExamTool<Input>, 'isConcurrencySafe' | 'isReadOnly'>>;
-
-export interface ProviderVisibleToolDescription {
-  name: ExamToolName;
-  description: string;
-  inputExample: ExamToolInput;
-}
-
-export const PROVIDER_VISIBLE_EXAM_TOOLS: ProviderVisibleToolDescription[] = [
-  {
-    name: 'answer_choice',
-    description: 'Answer one single-choice or true/false question by option label or exact option text.',
-    inputExample: { questionIndex: 1, answer: 'C' },
-  },
-  {
-    name: 'answer_multiple_choice',
-    description: 'Answer one multiple-choice question with option labels.',
-    inputExample: { questionIndex: 2, answers: ['A', 'C'] },
-  },
-  {
-    name: 'answer_blank',
-    description: 'Fill one blank question. The answers array follows the blank order.',
-    inputExample: { questionIndex: 3, answers: ['TCP', 'UDP'] },
-  },
-  {
-    name: 'answer_essay',
-    description: 'Write one short-answer, essay, or fallback text answer.',
-    inputExample: { questionIndex: 4, answer: '答案文本' },
-  },
-  {
-    name: 'answer_matching',
-    description: 'Answer one matching question using left item keys/stems mapped to right option labels/content.',
-    inputExample: { questionIndex: 5, pairs: { '1': 'A' } },
-  },
-];
-
-export function buildExamTool<Input>(def: ExamToolDefinition<Input>): ExamTool<Input> {
+/**
+ * 把类型化的 ExamToolDefinition 装配成 registry 可存储的 ExamTool。
+ * 默认 isConcurrencySafe = () => false——DOM 写入禁止并发，仅在显式覆盖时允许。
+ */
+export function buildExamTool<Input extends ExamToolInput>(def: ExamToolDefinition<Input>): ExamTool {
   return {
-    validateInput: () => null,
-    isConcurrencySafe: () => false,
-    isReadOnly: () => false,
-    ...def,
+    name: def.name,
+    description: def.description,
+    inputSchema: def.inputSchema as ExamTool['inputSchema'],
+    validateInput: def.validateInput as ExamTool['validateInput'],
+    isConcurrencySafe: (def.isConcurrencySafe ?? (() => false)) as ExamTool['isConcurrencySafe'],
+    execute: def.execute as ExamTool['execute'],
   };
 }
 
+/**
+ * 构造成功结果。filledCount 缺省为 1，省去每个工具重复书写。
+ */
 export function createToolSuccess(
   tool: ExamToolName,
   questionIndex: number,
@@ -174,6 +192,11 @@ export function createToolSuccess(
   };
 }
 
+/**
+ * 构造失败结果。retryable 必须由作者显式判定：
+ * - 结构性错误（如 invalid_answer_shape）一般 retryable=true，让 provider 重发。
+ * - DOM 写入失败、找不到题目这类一般 retryable=false，避免死循环。
+ */
 export function createToolError(args: {
   tool: ExamToolName | 'unknown';
   code: ExamToolErrorCode;
@@ -223,13 +246,6 @@ export function isAnswerEssayInput(input: unknown): input is AnswerEssayInput {
   return isRecord(input) && isPositiveInteger(input.questionIndex) && typeof input.answer === 'string';
 }
 
-function isMatchingPairArray(value: unknown): value is Array<{ left: string; right: string }> {
-  return (
-    Array.isArray(value) &&
-    value.every((item) => isRecord(item) && typeof item.left === 'string' && typeof item.right === 'string')
-  );
-}
-
 function isStringRecord(value: unknown): value is Record<string, string> {
   return isRecord(value) && Object.values(value).every((item) => typeof item === 'string');
 }
@@ -238,18 +254,6 @@ export function isAnswerMatchingInput(input: unknown): input is AnswerMatchingIn
   return (
     isRecord(input) &&
     isPositiveInteger(input.questionIndex) &&
-    (typeof input.pairs === 'string' ||
-      isStringArray(input.pairs) ||
-      isStringRecord(input.pairs) ||
-      isMatchingPairArray(input.pairs))
+    (typeof input.pairs === 'string' || isStringArray(input.pairs) || isStringRecord(input.pairs))
   );
-}
-
-export function matchingPairsToAnswerValue(pairs: AnswerMatchingPairs): AnswerValue {
-  if (typeof pairs === 'string' || isStringArray(pairs)) return pairs;
-  if (!Array.isArray(pairs)) return pairs;
-  return pairs.reduce<Record<string, string>>((acc, pair) => {
-    acc[pair.left] = pair.right;
-    return acc;
-  }, {});
 }

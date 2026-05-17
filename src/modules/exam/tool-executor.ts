@@ -74,29 +74,14 @@ function answerToToolUse(question: Question, answer: AnswerValue, source: ExamTo
   }
 }
 
-function withToolUseMetadata(result: ExamToolResult, toolUse: ExamToolUse, sequence: number): ExamToolResult {
+function withToolUseMetadata(result: ExamToolResult, toolUse: ExamToolUse): ExamToolResult {
   return {
     ...result,
     metadata: {
       toolUseId: toolUse.id,
       source: toolUse.source,
-      sequence,
     },
   };
-}
-
-export function legacyAIResponseToToolUses(questions: Question[], aiResponse: AIResponse): ExamToolUse[] {
-  const answerMap = new Map<number, AnswerValue>();
-  aiResponse.questions.forEach((item) => answerMap.set(item.index, item.answer));
-  const toolUses: ExamToolUse[] = [];
-
-  questions.forEach((question) => {
-    const answer = answerMap.get(question.index);
-    if (answer === undefined || answer === null) return;
-    toolUses.push(answerToToolUse(question, answer, 'legacy-ai-response'));
-  });
-
-  return toolUses;
 }
 
 function buildToolContext(questions: Question[], stats: ExamStats, signal?: AbortSignal): ExamToolContext {
@@ -134,11 +119,7 @@ function updateStatsFromToolResult(result: ExamToolResult, stats: ExamStats): vo
   warn(`${result.tool}: ${result.message} (${result.code}, retryable=${result.retryable})`);
 }
 
-async function runExamToolUse(
-  toolUse: ExamToolUse,
-  context: ExamToolContext,
-  sequence: number,
-): Promise<ExamToolResult> {
+async function runExamToolUse(toolUse: ExamToolUse, context: ExamToolContext): Promise<ExamToolResult> {
   if (context.signal?.aborted) {
     return withToolUseMetadata(
       createToolError({
@@ -148,7 +129,6 @@ async function runExamToolUse(
         retryable: false,
       }),
       toolUse,
-      sequence,
     );
   }
 
@@ -162,7 +142,6 @@ async function runExamToolUse(
         retryable: true,
       }),
       toolUse,
-      sequence,
     );
   }
 
@@ -175,15 +154,14 @@ async function runExamToolUse(
         retryable: true,
       }),
       toolUse,
-      sequence,
     );
   }
 
   const validationError = tool.validateInput?.(toolUse.input, context);
-  if (validationError) return withToolUseMetadata(validationError, toolUse, sequence);
+  if (validationError) return withToolUseMetadata(validationError, toolUse);
 
   try {
-    return withToolUseMetadata(await tool.execute(toolUse.input, context), toolUse, sequence);
+    return withToolUseMetadata(await tool.execute(toolUse.input, context), toolUse);
   } catch (err) {
     return withToolUseMetadata(
       createToolError({
@@ -193,7 +171,6 @@ async function runExamToolUse(
         retryable: false,
       }),
       toolUse,
-      sequence,
     );
   }
 }
@@ -221,22 +198,16 @@ function partitionToolUses(toolUses: ExamToolUse[]): ExamToolBatch[] {
   }, []);
 }
 
-async function runToolBatch(
-  batch: ExamToolBatch,
-  context: ExamToolContext,
-  sequenceByToolUse: Map<ExamToolUse, number>,
-): Promise<ExamToolResult[]> {
+async function runToolBatch(batch: ExamToolBatch, context: ExamToolContext): Promise<ExamToolResult[]> {
   if (!batch.isConcurrencySafe) {
     const results: ExamToolResult[] = [];
     for (const toolUse of batch.toolUses) {
-      results.push(await runExamToolUse(toolUse, context, sequenceByToolUse.get(toolUse) || 0));
+      results.push(await runExamToolUse(toolUse, context));
     }
     return results;
   }
 
-  return Promise.all(
-    batch.toolUses.map((toolUse) => runExamToolUse(toolUse, context, sequenceByToolUse.get(toolUse) || 0)),
-  );
+  return Promise.all(batch.toolUses.map((toolUse) => runExamToolUse(toolUse, context)));
 }
 
 export async function runExamTools(
@@ -248,10 +219,9 @@ export async function runExamTools(
   stats.toolCallCount += toolUses.length;
   const context = buildToolContext(questions, stats, signal);
   const results: ExamToolResult[] = [];
-  const sequenceByToolUse = new Map(toolUses.map((toolUse, index) => [toolUse, index + 1]));
 
   for (const batch of partitionToolUses(toolUses)) {
-    const batchResults = await runToolBatch(batch, context, sequenceByToolUse);
+    const batchResults = await runToolBatch(batch, context);
     batchResults.forEach((result) => updateStatsFromToolResult(result, stats));
     results.push(...batchResults);
   }
@@ -265,11 +235,11 @@ export async function fillAnswersWithTools(
   stats: ExamStats,
 ): Promise<ExamToolResult[]> {
   const answerMap = new Map<number, AnswerValue>();
-  aiResponse.questions.forEach((answer) => answerMap.set(answer.index, answer.answer));
+  aiResponse.questions.forEach((item) => answerMap.set(item.index, item.answer));
 
-  const aiIndexes = Array.from(answerMap.keys()).sort((a, b) => a - b);
-  const localIndexes = questions.map((question) => question.index).sort((a, b) => a - b);
   if (aiResponse.questions.length !== questions.length) {
+    const aiIndexes = Array.from(answerMap.keys()).sort((a, b) => a - b);
+    const localIndexes = questions.map((question) => question.index).sort((a, b) => a - b);
     warn(
       `AI 返回题数(${aiResponse.questions.length}) ≠ 本地题数(${questions.length})`,
       '| AI:',
@@ -279,19 +249,16 @@ export async function fillAnswersWithTools(
     );
   }
 
-  const toolUses = legacyAIResponseToToolUses(questions, aiResponse);
-  const toolUseIndexes = new Set(
-    toolUses
-      .map((toolUse) => (typeof toolUse.input === 'object' && toolUse.input !== null ? toolUse.input : null))
-      .map((input) => (input && 'questionIndex' in input ? input.questionIndex : undefined))
-      .filter((index): index is number => typeof index === 'number'),
-  );
-
+  // 单次遍历同时产出 toolUses 与 skipped 记录，避免之前两遍扫描 + 反查 toolUseIndexes 的重复簿记。
+  const toolUses: ExamToolUse[] = [];
   for (const question of questions) {
-    if (!toolUseIndexes.has(question.index)) {
+    const answer = answerMap.get(question.index);
+    if (answer === undefined || answer === null) {
       stats.skippedQuestions.push(question.index);
       warn(`题目 ${question.displayIndex}: AI 未返回答案，跳过`);
+      continue;
     }
+    toolUses.push(answerToToolUse(question, answer, 'legacy-ai-response'));
   }
 
   return runExamTools(questions, toolUses, stats);
