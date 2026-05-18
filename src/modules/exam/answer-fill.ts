@@ -2,7 +2,7 @@
  * 答案填写：将 AI 返回的答案写入页面 DOM
  */
 
-import type { QuestionType, Question, AIResponse, ExamStats, AnswerValue } from '@/types/exam';
+import type { QuestionType, Question, AnswerValue } from '@/types/exam';
 import { log, warn, isValidAnswer } from '@/types/exam';
 import { findQuestionElement } from './question-extract';
 import { fillEditable, fillTextarea, writeWithVerify, waitForEditor } from './answer-write';
@@ -287,11 +287,10 @@ async function fillEssayQuestion(subjectEl: Element, question: Question, answer:
 /**
  * 对单道题填写答案
  */
-async function fillAnswerForQuestion(question: Question, answer: AnswerValue, stats: ExamStats): Promise<boolean> {
+export async function fillAnswerForQuestion(question: Question, answer: AnswerValue): Promise<boolean> {
   const subjectEl = findQuestionElement(question);
   if (!subjectEl) {
     warn(`题目 ${question.displayIndex}: 未找到 DOM 元素`);
-    stats.fillFailedQuestions.push(question.index);
     return false;
   }
 
@@ -320,44 +319,5 @@ async function fillAnswerForQuestion(question: Question, answer: AnswerValue, st
       break;
   }
 
-  if (success) {
-    stats.filledCount++;
-    log(`题目 ${question.displayIndex} (${question.type}): 填写成功`);
-  } else {
-    stats.fillFailedQuestions.push(question.index);
-    warn(`题目 ${question.displayIndex} (${question.type}): 填写失败`);
-  }
   return success;
-}
-
-/**
- * 批量填写所有答案
- */
-export async function fillAnswers(questions: Question[], aiResponse: AIResponse, stats: ExamStats): Promise<void> {
-  const answerMap = new Map<number, AnswerValue>();
-  aiResponse.questions.forEach((a) => {
-    answerMap.set(a.index, a.answer);
-  });
-
-  const aiIndexes = Array.from(answerMap.keys()).sort((a, b) => a - b);
-  const localIndexes = questions.map((q) => q.index).sort((a, b) => a - b);
-  if (aiResponse.questions.length !== questions.length) {
-    warn(
-      `AI 返回题数(${aiResponse.questions.length}) ≠ 本地题数(${questions.length})`,
-      '| AI:',
-      aiIndexes.join(','),
-      '| 本地:',
-      localIndexes.join(','),
-    );
-  }
-
-  for (const question of questions) {
-    const answer = answerMap.get(question.index);
-    if (answer === undefined || answer === null) {
-      stats.skippedQuestions.push(question.index);
-      warn(`题目 ${question.displayIndex}: AI 未返回答案，跳过`);
-      continue;
-    }
-    await fillAnswerForQuestion(question, answer, stats);
-  }
 }

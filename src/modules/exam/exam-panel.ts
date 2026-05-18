@@ -14,7 +14,7 @@ import { makeDraggable } from '@/utils/helper';
 import { saveExamConfig, getExamConfig } from '@/utils/storage';
 import { waitForQuestionsStable, extractQuestions } from './question-extract';
 import { callProvider } from './ai-provider';
-import { fillAnswers } from './answer-fill';
+import { fillAnswersWithTools } from './tool-executor';
 
 /**
  * 把 stats 中的整数 index 列表映射回人类可读的 displayIndex 列表。
@@ -34,6 +34,9 @@ function printExamStats(stats: ExamStats, questions: Question[]): void {
     提取题目数: stats.extractedCount,
     'AI 返回题目数': stats.aiReturnedCount,
     成功填写数: stats.filledCount,
+    工具调用数: stats.toolCallCount,
+    工具成功数: stats.toolSucceededCount,
+    工具失败数: stats.toolFailedCount,
     '跳过 (AI未返回)': stats.skippedQuestions.length,
     填写失败数: stats.fillFailedQuestions.length,
     未知题型数: stats.unknownTypeQuestions.length,
@@ -47,6 +50,10 @@ function printExamStats(stats: ExamStats, questions: Question[]): void {
   }
   if (stats.fillFailedQuestions.length > 0) {
     warn('填写失败的题目:', toDisplayIndexes(stats.fillFailedQuestions, questions).join(', '));
+  }
+  if (stats.toolErrors.length > 0) {
+    warn('工具执行错误:', stats.toolErrors);
+    warn('工具错误分类:', stats.toolFailuresByCode);
   }
   if (stats.unknownTypeQuestions.length > 0) {
     warn('未识别题型的题目:', toDisplayIndexes(stats.unknownTypeQuestions, questions).join(', '));
@@ -65,6 +72,11 @@ async function startAutoExam(config: ExamConfig): Promise<void> {
     extractedCount: 0,
     aiReturnedCount: 0,
     filledCount: 0,
+    toolCallCount: 0,
+    toolSucceededCount: 0,
+    toolFailedCount: 0,
+    toolFailuresByCode: {},
+    toolErrors: [],
     skippedQuestions: [],
     fillFailedQuestions: [],
     unknownTypeQuestions: [],
@@ -120,7 +132,7 @@ async function startAutoExam(config: ExamConfig): Promise<void> {
     showStatus(`AI 返回 ${aiResponse.questions.length} 道答案，正在填写...`, 'info');
 
     // 填写答案
-    await fillAnswers(questions, aiResponse, stats);
+    await fillAnswersWithTools(questions, aiResponse, stats);
 
     // 打印统计
     printExamStats(stats, questions);
