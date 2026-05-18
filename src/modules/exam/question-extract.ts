@@ -4,11 +4,13 @@
 
 import type { Question } from '@/types/exam';
 import { IMAGE_HINT_KEYWORDS, SUB_INDEX_MULTIPLIER, log, warn } from '@/types/exam';
+import { buildClozeDescription, extractClozeOptions } from './cloze-select';
 import { detectQuestionType, extractQuestionImages } from './question-detect';
 import {
   ANALYSIS_PARENT_CLASS,
   BLANK_ANSWER_SELECTOR,
   BLANK_IN_DESCRIPTION_SELECTOR,
+  CLOZE_SELECT_SELECTOR,
   OPTION_SELECTOR,
   SUBJECT_DESCRIPTION_SELECTOR,
   SUBJECT_INDEX_SELECTORS,
@@ -365,8 +367,11 @@ export function extractQuestions(): Question[] {
     // 检测填空空位数（去重：同一个元素只算一次）
     let blankCount = 0;
     if (type === 'fill_in_blank') {
+      const clozeSelects = new Set(Array.from(element.querySelectorAll(CLOZE_SELECT_SELECTOR)));
       const descBlanks = new Set(Array.from(element.querySelectorAll(BLANK_IN_DESCRIPTION_SELECTOR)));
-      if (descBlanks.size > 0) {
+      if (clozeSelects.size > 0) {
+        blankCount = clozeSelects.size;
+      } else if (descBlanks.size > 0) {
         blankCount = descBlanks.size;
       } else {
         const allBlanks = new Set(
@@ -390,8 +395,18 @@ export function extractQuestions(): Question[] {
     if (blankCount > 1) {
       modelHints.push(`此题有 ${blankCount} 个空位，请返回数组答案`);
     }
+    if (type === 'fill_in_blank' && element.querySelector(CLOZE_SELECT_SELECTOR)) {
+      modelHints.push('此题是完形填空/补全对话，空位为下拉选项，请按空位顺序返回选项字母数组，如 ["A","D"]');
+    }
 
-    const rawText = element.textContent?.trim() || '';
+    const descriptionForModel =
+      type === 'fill_in_blank' && element.querySelector(CLOZE_SELECT_SELECTOR)
+        ? buildClozeDescription(element)
+        : description;
+    const rawText =
+      type === 'fill_in_blank' && element.querySelector(CLOZE_SELECT_SELECTOR)
+        ? descriptionForModel
+        : element.textContent?.trim() || '';
 
     const question: Question = {
       index,
@@ -399,7 +414,7 @@ export function extractQuestions(): Question[] {
       type,
       sectionTitle,
       scoreText,
-      description,
+      description: descriptionForModel,
       rawText: rawText.substring(0, 2000),
       blankCount,
       hasImage,
@@ -412,6 +427,10 @@ export function extractQuestions(): Question[] {
     // 提取选项（选择题、判断题）
     if (['single_selection', 'multiple_selection', 'true_or_false'].includes(type)) {
       question.options = extractChoiceOptions(element);
+    }
+
+    if (type === 'fill_in_blank' && element.querySelector(CLOZE_SELECT_SELECTOR)) {
+      question.options = extractClozeOptions(element);
     }
 
     // unknown 类型也尝试提取选项（万一有选项结构）

@@ -33,6 +33,12 @@ export function detectQuestionType(element: Element): { type: QuestionType; rawT
     }
   }
 
+  // OUCHN 完形填空/补全对话题：题干内嵌隐藏 select.___select-answer，语义上仍走填空工具。
+  // 必须早于 radio 兜底，因为 jQuery multiselect 菜单内部也会生成 radio。
+  if (element.classList.contains('cloze') || element.querySelector('select.___select-answer, select[multi-select]')) {
+    return { type: 'fill_in_blank', rawTypeText: typeText || 'inferred_cloze_select_blank' };
+  }
+
   // 再兜底：如果有 input[type="radio"]，可能是选择/判断题
   if (element.querySelector('input[type="radio"]')) {
     const optionCount = element.querySelectorAll('.option').length;
