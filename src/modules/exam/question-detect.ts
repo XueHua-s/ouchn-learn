@@ -4,6 +4,8 @@
 
 import type { QuestionType, QuestionImage } from '@/types/exam';
 import { TYPE_TEXT_MAP, TYPE_CLASS_MAP, warn } from '@/types/exam';
+import { isClozeElement } from './cloze-select';
+import { SUBJECT_DESCRIPTION_SELECTOR } from './selectors';
 
 type Html2Canvas = (element: Element, options?: Record<string, unknown>) => Promise<HTMLCanvasElement>;
 
@@ -31,6 +33,13 @@ export function detectQuestionType(element: Element): { type: QuestionType; rawT
     if (classList.contains(className)) {
       return { type, rawTypeText: typeText || className };
     }
+  }
+
+  // OUCHN 完形填空/补全对话题：题干内嵌隐藏 select，语义上仍走填空工具。
+  // 必须早于 radio 兜底，因为 jQuery multiselect 菜单内部也会生成 radio。
+  // `class=cloze` 已由 TYPE_CLASS_MAP 提前命中，这里只补 DOM 侧的兜底。
+  if (isClozeElement(element)) {
+    return { type: 'fill_in_blank', rawTypeText: typeText || 'inferred_cloze_select_blank' };
   }
 
   // 再兜底：如果有 input[type="radio"]，可能是选择/判断题
@@ -75,8 +84,44 @@ export function detectQuestionType(element: Element): { type: QuestionType; rawT
 // 图片提取
 // ============================================================
 
+const DECORATIVE_IMAGE_CONTAINER_SELECTOR = [
+  '.pswp',
+  '.pswp__ui',
+  '.pswp__bg',
+  '.pswp__scroll-wrap',
+  '.my-gallery',
+  '.ui-multiselect',
+  '.ui-multiselect-menu',
+  '.ui-icon',
+  '.select2-container',
+  '.select2-drop',
+  '.select2-results',
+  '.font',
+  '[class^="font-"]',
+  '[class*=" font-"]',
+  '.icon',
+  '[class^="icon-"]',
+  '[class*=" icon-"]',
+  '.ouchn-panel',
+  '.download-panel',
+  '#ai-exam-panel',
+  '#immersive-translate-popup',
+  '.reveal-modal',
+  '.popup-area',
+  '.MathJax',
+  '[class^="MathJax"]',
+  '[class*=" MathJax"]',
+  '.loading',
+  '.spinner',
+  '[class*="loading"]',
+  '[class*="spinner"]',
+  '[aria-hidden="true"]',
+].join(', ');
+
+const CONTENT_BACKGROUND_SELECTOR = [SUBJECT_DESCRIPTION_SELECTOR, '.option-content', '.simditor-viewer'].join(', ');
+
 function isIgnoredImageContainer(element: Element): boolean {
-  return !!element.closest('.pswp, .pswp__ui, .pswp__bg, .pswp__scroll-wrap, .my-gallery, [aria-hidden="true"]');
+  return !!element.closest(DECORATIVE_IMAGE_CONTAINER_SELECTOR);
 }
 
 function isVisibleElement(element: Element): boolean {
@@ -87,6 +132,45 @@ function isVisibleElement(element: Element): boolean {
   return rect.width > 0 && rect.height > 0;
 }
 
+function isStrongDecorativeImageUrl(src: string): boolean {
+  const normalized = src.trim().toLowerCase();
+  if (!normalized) return true;
+  return /(?:favicon|sprite|ui-icons?|loading|spinner|transparent|blank\.(?:gif|png))/.test(normalized);
+}
+
+function getClassText(element: Element): string {
+  const className = (element as HTMLElement).className;
+  return typeof className === 'string' ? className.toLowerCase() : '';
+}
+
+function isTinyElement(element: Element, minEdge = 24): boolean {
+  const rect = (element as HTMLElement).getBoundingClientRect();
+  return rect.width < minEdge || rect.height < minEdge;
+}
+
+function isMeaningfulImgElement(img: HTMLImageElement): boolean {
+  if (isIgnoredImageContainer(img) || !isVisibleElement(img)) return false;
+
+  const src = img.src || img.getAttribute('src') || '';
+  if (isStrongDecorativeImageUrl(src)) return false;
+
+  const classText = getClassText(img);
+  const naturalLargeEnough = img.naturalWidth >= 80 || img.naturalHeight >= 80;
+  if (isTinyElement(img) && !naturalLargeEnough) return false;
+
+  // FIXED: OUCHN 完形填空会在题干里为每个下拉空生成 jQuery UI 图标。
+  //        这些小图标被误判为题图后会触发多模态请求，导致纯文本完形题被 AI 跳过。
+  return !(/(?:^|\s)(?:ui-icon|icon|loading|spinner|avatar|logo)(?:\s|$)/.test(classText) && isTinyElement(img, 40));
+}
+
+function isMeaningfulBackgroundElement(element: Element): boolean {
+  if (isIgnoredImageContainer(element) || !isVisibleElement(element)) return false;
+  if (!element.closest(CONTENT_BACKGROUND_SELECTOR)) return false;
+  if (isTinyElement(element, 48)) return false;
+  const classText = getClassText(element);
+  return !/(?:ui-icon|icon|loading|spinner|avatar|logo)/.test(classText);
+}
+
 /**
  * 提取题目中的所有图片信息
  */
@@ -95,7 +179,7 @@ export function extractQuestionImages(element: Element): QuestionImage[] {
   const imgElements = element.querySelectorAll('img');
 
   imgElements.forEach((img) => {
-    if (isIgnoredImageContainer(img) || !isVisibleElement(img)) return;
+    if (!isMeaningfulImgElement(img)) return;
 
     const src = img.src || img.getAttribute('src') || '';
     const alt = img.alt || '';
@@ -114,13 +198,13 @@ export function extractQuestionImages(element: Element): QuestionImage[] {
   // 检查背景图
   const allElements = element.querySelectorAll('*');
   allElements.forEach((el) => {
-    if (isIgnoredImageContainer(el) || !isVisibleElement(el)) return;
+    if (!isMeaningfulBackgroundElement(el)) return;
 
     const style = window.getComputedStyle(el);
     const bgImage = style.backgroundImage;
     if (bgImage && bgImage !== 'none' && bgImage.startsWith('url(')) {
       const urlMatch = bgImage.match(/url\(["']?(.*?)["']?\)/);
-      if (urlMatch && urlMatch[1]) {
+      if (urlMatch && urlMatch[1] && !isStrongDecorativeImageUrl(urlMatch[1])) {
         images.push({ src: urlMatch[1], alt: 'background-image', dataAttrs: {} });
       }
     }

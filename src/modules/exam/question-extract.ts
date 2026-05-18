@@ -4,6 +4,7 @@
 
 import type { Question } from '@/types/exam';
 import { IMAGE_HINT_KEYWORDS, SUB_INDEX_MULTIPLIER, log, warn } from '@/types/exam';
+import { buildClozeQuestionData, isClozeElement } from './cloze-select';
 import { detectQuestionType, extractQuestionImages } from './question-detect';
 import {
   ANALYSIS_PARENT_CLASS,
@@ -362,17 +363,25 @@ export function extractQuestions(): Question[] {
     const images = extractQuestionImages(element);
     const hasImage = images.length > 0;
 
+    // 完形填空题的全部派生字段（description/rawText/选项/空位数/modelHint）一次性算出，
+    // 避免上层散落多处 querySelector(CLOZE_SELECT_SELECTOR) 复述同一判断。
+    const clozeData = type === 'fill_in_blank' && isClozeElement(element) ? buildClozeQuestionData(element) : null;
+
     // 检测填空空位数（去重：同一个元素只算一次）
     let blankCount = 0;
     if (type === 'fill_in_blank') {
-      const descBlanks = new Set(Array.from(element.querySelectorAll(BLANK_IN_DESCRIPTION_SELECTOR)));
-      if (descBlanks.size > 0) {
-        blankCount = descBlanks.size;
+      if (clozeData) {
+        blankCount = clozeData.blankCount;
       } else {
-        const allBlanks = new Set(
-          Array.from(element.querySelectorAll(`${BLANK_ANSWER_SELECTOR}, [contenteditable="true"]`)),
-        );
-        blankCount = allBlanks.size;
+        const descBlanks = new Set(Array.from(element.querySelectorAll(BLANK_IN_DESCRIPTION_SELECTOR)));
+        if (descBlanks.size > 0) {
+          blankCount = descBlanks.size;
+        } else {
+          const allBlanks = new Set(
+            Array.from(element.querySelectorAll(`${BLANK_ANSWER_SELECTOR}, [contenteditable="true"]`)),
+          );
+          blankCount = allBlanks.size;
+        }
       }
     }
 
@@ -390,8 +399,12 @@ export function extractQuestions(): Question[] {
     if (blankCount > 1) {
       modelHints.push(`此题有 ${blankCount} 个空位，请返回数组答案`);
     }
+    if (clozeData) {
+      modelHints.push(clozeData.modelHint);
+    }
 
-    const rawText = element.textContent?.trim() || '';
+    const descriptionForModel = clozeData?.description ?? description;
+    const rawText = clozeData?.rawText ?? (element.textContent?.trim() || '');
 
     const question: Question = {
       index,
@@ -399,7 +412,7 @@ export function extractQuestions(): Question[] {
       type,
       sectionTitle,
       scoreText,
-      description,
+      description: descriptionForModel,
       rawText: rawText.substring(0, 2000),
       blankCount,
       hasImage,
@@ -412,6 +425,10 @@ export function extractQuestions(): Question[] {
     // 提取选项（选择题、判断题）
     if (['single_selection', 'multiple_selection', 'true_or_false'].includes(type)) {
       question.options = extractChoiceOptions(element);
+    }
+
+    if (clozeData) {
+      question.options = clozeData.options;
     }
 
     // unknown 类型也尝试提取选项（万一有选项结构）

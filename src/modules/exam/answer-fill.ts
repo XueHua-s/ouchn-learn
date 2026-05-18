@@ -7,6 +7,7 @@ import { log, warn, isValidAnswer } from '@/types/exam';
 import { findQuestionElement } from './question-extract';
 import { fillEditable, fillTextarea, writeWithVerify, waitForEditor } from './answer-write';
 import { fillMatchingQuestion } from './answer-match';
+import { fillClozeSelectQuestion, isClozeElement } from './cloze-select';
 import {
   ANSWER_AREA_SELECTOR,
   BLANK_ANSWER_SELECTOR,
@@ -216,6 +217,10 @@ function fillMultipleChoiceQuestion(subjectEl: Element, _question: Question, ans
  * 填写填空题（支持多空）
  */
 async function fillBlankQuestion(subjectEl: Element, question: Question, answer: AnswerValue): Promise<boolean> {
+  if (isClozeElement(subjectEl)) {
+    return await fillClozeSelectQuestion(subjectEl, question, answer);
+  }
+
   const editors = findAnswerEditors(subjectEl, 'fill_in_blank');
   if (editors.length === 0) {
     warn(`题目 ${question.displayIndex}: 未找到填空编辑器`);

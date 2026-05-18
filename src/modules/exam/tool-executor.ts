@@ -18,6 +18,7 @@ import {
 type ExamToolBatch = { isConcurrencySafe: boolean; toolUses: ExamToolUse[] };
 
 function answerToStringArray(answer: AnswerValue): string[] {
+  if (answer && typeof answer === 'object' && !Array.isArray(answer)) return Object.values(answer).map(String);
   return Array.isArray(answer) ? answer.map(String) : [String(answer)];
 }
 

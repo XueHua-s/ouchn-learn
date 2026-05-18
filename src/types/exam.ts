@@ -145,7 +145,7 @@ export const TYPE_TEXT_MAP: Array<{ pattern: RegExp; type: QuestionType }> = [
   { pattern: /单选题/, type: 'single_selection' },
   { pattern: /多选题/, type: 'multiple_selection' },
   { pattern: /判断题/, type: 'true_or_false' },
-  { pattern: /填空题/, type: 'fill_in_blank' },
+  { pattern: /填空题|完形填空题/, type: 'fill_in_blank' },
   { pattern: /简答题|综合题|应用题|论述题|分析题|计算题|编程题/, type: 'short_answer' },
   { pattern: /匹配题|配对题/, type: 'matching' },
 ];
@@ -156,6 +156,7 @@ export const TYPE_CLASS_MAP: Array<{ className: string; type: QuestionType }> = 
   { className: 'multiple_selection', type: 'multiple_selection' },
   { className: 'true_or_false', type: 'true_or_false' },
   { className: 'fill_in_blank', type: 'fill_in_blank' },
+  { className: 'cloze', type: 'fill_in_blank' },
   { className: 'short_answer', type: 'short_answer' },
   { className: 'essay', type: 'short_answer' },
   { className: 'subjective', type: 'short_answer' },

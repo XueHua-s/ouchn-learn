@@ -3,28 +3,15 @@
  */
 
 import { warn } from '@/types/exam';
-
-type AngularNgModelController = {
-  $setViewValue?: (value: string) => void;
-  $render?: () => void;
-};
-
-type AngularElement = {
-  controller: (name: string) => AngularNgModelController | undefined;
-  scope?: () => { $apply?: () => void } | undefined;
-};
-
-type AngularGlobal = {
-  element: (el: HTMLElement) => AngularElement;
-};
+import { getPageWindow } from '@/utils/page-runtime';
 
 /** 触发 AngularJS $setViewValue + $apply */
 export function triggerAngularUpdate(el: HTMLElement, value: string): void {
   try {
-    const ng = (window as Window & { angular?: AngularGlobal }).angular;
+    const ng = getPageWindow(el).angular;
     if (!ng) return;
     const ngEl = ng.element(el);
-    const ctrl = ngEl.controller('ngModel');
+    const ctrl = ngEl.controller?.('ngModel');
     if (ctrl?.$setViewValue) {
       ctrl.$setViewValue(value);
       ctrl.$render?.();

@@ -6,6 +6,7 @@ import type { AnswerValue, Question, QuestionType } from '@/types/exam';
 import { isValidAnswer } from '@/types/exam';
 import { findQuestionElement } from './question-extract';
 import { fillAnswerForQuestion } from './answer-fill';
+import { isClozeSelectQuestion, validateClozeAnswers } from './cloze-select';
 import {
   buildExamTool,
   createToolError,
@@ -197,6 +198,27 @@ function validateMultipleChoiceAnswers(question: Question, answers: string[]): E
 function validateBlankAnswers(question: Question, answers: string[]): ExamToolResult | null {
   if (answers.length === 0 || !answers.some((answer) => isValidAnswer(answer))) {
     return invalidShape('answer_blank', question.index, `题目 ${question.displayIndex}: 填空答案为空或无效`);
+  }
+
+  if (isClozeSelectQuestion(question)) {
+    const result = validateClozeAnswers(question, answers);
+    if (result.ok) return null;
+    if (result.reason === 'blank_count_mismatch') {
+      return createToolError({
+        tool: 'answer_blank',
+        questionIndex: question.index,
+        code: 'blank_count_mismatch',
+        message: `题目 ${question.displayIndex}: 下拉空位需要 ${result.expected} 个答案，实际 ${result.actual} 个`,
+        retryable: true,
+      });
+    }
+    return createToolError({
+      tool: 'answer_blank',
+      questionIndex: question.index,
+      code: 'unknown_option_label',
+      message: `题目 ${question.displayIndex}: 未识别下拉选项 "${result.value}"`,
+      retryable: true,
+    });
   }
 
   if (question.blankCount > 1 && answers.length > 1 && answers.length !== question.blankCount) {

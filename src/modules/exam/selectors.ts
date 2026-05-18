@@ -51,6 +51,9 @@ export const BLANK_IN_DESCRIPTION_SELECTOR =
 /** 填空题专用 contenteditable */
 export const BLANK_ANSWER_SELECTOR = '.___answer[contenteditable="true"]';
 
+/** 完形填空/补全对话：题干内嵌的隐藏下拉选择框 */
+export const CLOZE_SELECT_SELECTOR = 'select.___select-answer, select[multi-select][ng-model*="answeredOption"]';
+
 /** 判断"contenteditable 是否在题干区域里"——题干区域不应被当作作答编辑器 */
 export function isInsideSubjectDescription(el: Element): boolean {
   return !!el.closest(SUBJECT_DESCRIPTION_SELECTOR);

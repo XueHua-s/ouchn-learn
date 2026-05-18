@@ -4,6 +4,7 @@
 
 import type { AnswerValue, Question } from '@/types/exam';
 import { log, warn } from '@/types/exam';
+import { getPageWindow, type AngularScope } from '@/utils/page-runtime';
 import { triggerAngularUpdate } from './answer-write';
 
 /** 序号字符 → 数字映射 */
@@ -18,13 +19,6 @@ const CIRCLED_NUM_MAP: Record<string, string> = {
   '⑧': '8',
   '⑨': '9',
   '⑩': '10',
-};
-
-type AngularScope = {
-  $apply?: () => void;
-  $evalAsync?: () => void;
-  $parent?: AngularScope;
-  [key: string]: unknown;
 };
 
 type MatchingOptionLike = {
@@ -48,11 +42,6 @@ type MatchingSubjectLike = {
   not_answered?: boolean;
   [key: string]: unknown;
 };
-
-type PageWindow = Window &
-  typeof globalThis & {
-    angular?: { element: (el: Element) => { scope?: () => AngularScope; isolateScope?: () => AngularScope } };
-  };
 
 function normalizeKey(k: string): string {
   const trimmed = k.trim();
@@ -119,11 +108,6 @@ function resolveChoiceId(rawValue: string, question: Question): string | undefin
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object';
-}
-
-function getPageWindow(element?: Element): PageWindow {
-  const unsafeWin = (globalThis as unknown as { unsafeWindow?: PageWindow }).unsafeWindow;
-  return unsafeWin || (element?.ownerDocument.defaultView as PageWindow | null) || (window as unknown as PageWindow);
 }
 
 function getAngularScope(subjectEl: Element): AngularScope | null {
