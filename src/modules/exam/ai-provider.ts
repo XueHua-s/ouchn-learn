@@ -246,6 +246,38 @@ async function callClaude(config: ExamConfig, systemPrompt: string, userContent:
   return data.content?.find((part: { type?: string; text?: string }) => part.type === 'text')?.text || '';
 }
 
+async function callQuestionProvider(
+  config: ExamConfig,
+  systemPrompt: string,
+  userPrompt: string,
+  imageBase64List: string[],
+): Promise<string> {
+  const useVision = imageBase64List.length > 0;
+
+  if (config.provider === 'openai') {
+    if (useVision) {
+      return callOpenAI(config, systemPrompt, buildOpenAIVisionContent(userPrompt, imageBase64List));
+    }
+    return callOpenAI(config, systemPrompt, userPrompt);
+  }
+
+  if (config.provider === 'claude') {
+    if (useVision) {
+      return callClaude(config, systemPrompt, buildClaudeVisionContent(userPrompt, imageBase64List));
+    }
+    return callClaude(config, systemPrompt, userPrompt);
+  }
+
+  throw new Error(`不支持的 provider: ${config.provider}`);
+}
+
+function markImageDegraded(stats: ExamStats, questionIndex: number): void {
+  stats.visionModeQuestions = stats.visionModeQuestions.filter((idx) => idx !== questionIndex);
+  if (!stats.degradedImageQuestions.includes(questionIndex)) {
+    stats.degradedImageQuestions.push(questionIndex);
+  }
+}
+
 // ============================================================
 // 单题响应解析
 // ============================================================
@@ -331,30 +363,45 @@ async function callSingleQuestion(
   }
 
   try {
-    let rawContent: string;
     const useVision = imageBase64List.length > 0;
+    const rawContent = await callQuestionProvider(config, systemPrompt, userPrompt, imageBase64List);
+    const parsedAnswer = parseSingleAnswer(rawContent, q.index, q.displayIndex);
 
-    if (config.provider === 'openai') {
-      if (useVision) {
-        const visionContent = buildOpenAIVisionContent(userPrompt, imageBase64List);
-        rawContent = await callOpenAI(config, systemPrompt, visionContent);
-      } else {
-        rawContent = await callOpenAI(config, systemPrompt, userPrompt);
-      }
-    } else if (config.provider === 'claude') {
-      if (useVision) {
-        const visionContent = buildClaudeVisionContent(userPrompt, imageBase64List);
-        rawContent = await callClaude(config, systemPrompt, visionContent);
-      } else {
-        rawContent = await callClaude(config, systemPrompt, userPrompt);
-      }
-    } else {
-      throw new Error(`不支持的 provider: ${config.provider}`);
+    if (parsedAnswer || !useVision) {
+      return { answer: parsedAnswer };
     }
 
-    return { answer: parseSingleAnswer(rawContent, q.index, q.displayIndex) };
+    // FIXED: 题干内的装饰图/控件背景偶发误判为题图时，视觉请求可能返回空或无效答案。
+    //        用同一题文本重试一次，避免纯文本题因为图片链路失败被直接跳过。
+    warn(`题目 ${q.displayIndex}: 视觉模式未得到有效答案，降级为文本模式重试`);
+    markImageDegraded(stats, q.index);
+    const fallbackRawContent = await callQuestionProvider(config, systemPrompt, userPrompt, []);
+    return { answer: parseSingleAnswer(fallbackRawContent, q.index, q.displayIndex) };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    if (imageBase64List.length > 0) {
+      warn(`题目 ${q.displayIndex}: 视觉请求失败，降级为文本模式重试:`, message);
+      markImageDegraded(stats, q.index);
+      try {
+        const fallbackRawContent = await callQuestionProvider(config, systemPrompt, userPrompt, []);
+        const fallbackAnswer = parseSingleAnswer(fallbackRawContent, q.index, q.displayIndex);
+        if (fallbackAnswer) {
+          return { answer: fallbackAnswer };
+        }
+      } catch (fallbackErr) {
+        const fallbackMessage = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+        error(`题目 ${q.displayIndex} 文本重试失败:`, fallbackMessage);
+        return {
+          answer: null,
+          failure: {
+            questionIndex: q.index,
+            displayIndex: q.displayIndex,
+            message: `${message}; 文本重试失败: ${fallbackMessage}`,
+          },
+        };
+      }
+    }
+
     error(`题目 ${q.displayIndex} 请求失败:`, message);
     return {
       answer: null,
