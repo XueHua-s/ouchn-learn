@@ -18,10 +18,20 @@ type AngularGlobal = {
   element: (el: HTMLElement) => AngularElement;
 };
 
+type PageWindow = Window &
+  typeof globalThis & {
+    angular?: AngularGlobal;
+  };
+
+function getPageWindow(element?: Element): PageWindow {
+  const unsafeWin = (globalThis as unknown as { unsafeWindow?: PageWindow }).unsafeWindow;
+  return unsafeWin || (element?.ownerDocument.defaultView as PageWindow | null) || (window as unknown as PageWindow);
+}
+
 /** 触发 AngularJS $setViewValue + $apply */
 export function triggerAngularUpdate(el: HTMLElement, value: string): void {
   try {
-    const ng = (window as Window & { angular?: AngularGlobal }).angular;
+    const ng = getPageWindow(el).angular;
     if (!ng) return;
     const ngEl = ng.element(el);
     const ctrl = ngEl.controller('ngModel');

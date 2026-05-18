@@ -218,7 +218,7 @@ function fillMultipleChoiceQuestion(subjectEl: Element, _question: Question, ans
  */
 async function fillBlankQuestion(subjectEl: Element, question: Question, answer: AnswerValue): Promise<boolean> {
   if (getClozeSelects(subjectEl).length > 0) {
-    return fillClozeSelectQuestion(subjectEl, question, answer);
+    return await fillClozeSelectQuestion(subjectEl, question, answer);
   }
 
   const editors = findAnswerEditors(subjectEl, 'fill_in_blank');

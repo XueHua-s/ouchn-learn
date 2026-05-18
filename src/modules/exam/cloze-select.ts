@@ -8,6 +8,50 @@ import { isValidAnswer, log, warn } from '@/types/exam';
 import { triggerAngularUpdate } from './answer-write';
 import { CLOZE_SELECT_SELECTOR, SUBJECT_SELECTOR } from './selectors';
 
+type PageWindow = Window &
+  typeof globalThis & {
+    angular?: {
+      element: (el: Element) => {
+        controller?: (name: string) => AngularNgModelController | undefined;
+        injector?: () => { get?: (name: string) => unknown } | undefined;
+        scope?: () => AngularScope | undefined;
+        isolateScope?: () => AngularScope | undefined;
+      };
+    };
+    jQuery?: JQueryStatic;
+    $?: JQueryStatic;
+  };
+
+type AngularScope = {
+  $apply?: () => void;
+  $eval?: (expression: string, locals?: Record<string, unknown>) => unknown;
+  $evalAsync?: () => void;
+  [key: string]: unknown;
+};
+
+type AngularNgModelController = {
+  $setViewValue?: (value: string) => void;
+  $render?: () => void;
+  $modelValue?: unknown;
+  $viewValue?: unknown;
+};
+
+type AngularParseResult = {
+  assign?: (scope: AngularScope, value: unknown) => void;
+};
+
+type AngularParse = (expression: string) => AngularParseResult;
+
+type AngularModelRead = {
+  available: boolean;
+  value: string;
+};
+
+function getPageWindow(element?: Element): PageWindow {
+  const unsafeWin = (globalThis as unknown as { unsafeWindow?: PageWindow }).unsafeWindow;
+  return unsafeWin || (element?.ownerDocument.defaultView as PageWindow | null) || (window as unknown as PageWindow);
+}
+
 function normalizeInlineText(text: string): string {
   return text.replace(/[\s\u00a0]+/g, ' ').trim();
 }
@@ -169,18 +213,126 @@ function dispatchFormEvents(element: HTMLElement): void {
   element.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
-function syncClozeMultiselect(select: HTMLSelectElement, option: HTMLOptionElement): void {
+function getNativeValueSetter(): ((this: HTMLSelectElement, value: string) => void) | undefined {
+  return Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
+}
+
+function setSelectValue(select: HTMLSelectElement, option: HTMLOptionElement): void {
+  Array.from(select.options).forEach((item) => {
+    item.selected = item === option;
+  });
+  const nativeSetter = getNativeValueSetter();
+  if (nativeSetter) {
+    nativeSetter.call(select, option.value);
+  } else {
+    select.value = option.value;
+  }
+}
+
+function triggerPageJqueryChange(select: HTMLSelectElement): void {
+  try {
+    const pageWin = getPageWindow(select);
+    const jq = pageWin.jQuery || pageWin.$;
+    jq?.(select).trigger('change');
+  } catch {
+    // 页面 jQuery 不可用时，原生 change 事件已经覆盖基础同步路径。
+  }
+}
+
+function triggerPageMultiselectChange(select: HTMLSelectElement): void {
+  try {
+    const pageWin = getPageWindow(select);
+    const jq = pageWin.jQuery || pageWin.$;
+    const selectedValues = [select.value];
+    const jqSelect = jq?.(select) as
+      | (JQuery<HTMLSelectElement> & { multiselect?: (...args: unknown[]) => JQuery })
+      | undefined;
+    jqSelect?.multiselect?.('widget').find(`input[value="${select.value}"]`).prop('checked', true).trigger('click');
+    jqSelect?.multiselect?.('refresh');
+    jqSelect?.multiselect?.('value', selectedValues);
+  } catch {
+    // multiselect 插件版本不一致时，radio click + select change 仍是主路径。
+  }
+}
+
+function updateAngularModel(select: HTMLSelectElement, value: string): boolean {
+  try {
+    const ng = getPageWindow(select).angular;
+    const ngEl = ng?.element(select);
+    const ctrl = ngEl?.controller?.('ngModel');
+    ctrl?.$setViewValue?.(value);
+    ctrl?.$render?.();
+
+    const scope = ngEl?.scope?.() || ngEl?.isolateScope?.();
+    const expression = select.getAttribute('ng-model');
+    if (scope?.$eval && expression) {
+      scope.$eval(`${expression} = value`, { value });
+    }
+    const injector = ngEl?.injector?.();
+    const parse = injector?.get?.('$parse') as AngularParse | undefined;
+    if (scope && expression && parse) {
+      parse(expression).assign?.(scope, value);
+    }
+
+    try {
+      scope?.$apply?.();
+    } catch {
+      scope?.$evalAsync?.();
+    }
+
+    return Boolean(ctrl || scope);
+  } catch {
+    return false;
+  }
+}
+
+function readAngularModel(select: HTMLSelectElement): AngularModelRead {
+  try {
+    const ng = getPageWindow(select).angular;
+    const ngEl = ng?.element(select);
+    const ctrl = ngEl?.controller?.('ngModel');
+    const ctrlValue = ctrl?.$modelValue ?? ctrl?.$viewValue;
+    if (ctrlValue !== undefined && ctrlValue !== null) return { available: true, value: String(ctrlValue) };
+
+    const scope = ngEl?.scope?.() || ngEl?.isolateScope?.();
+    const expression = select.getAttribute('ng-model');
+    const scopedValue = scope?.$eval && expression ? scope.$eval(expression) : undefined;
+    return scopedValue === undefined || scopedValue === null
+      ? { available: Boolean(scope && expression), value: '' }
+      : { available: true, value: String(scopedValue) };
+  } catch {
+    return { available: false, value: '' };
+  }
+}
+
+function findClozeMultiselectRadio(select: HTMLSelectElement, option: HTMLOptionElement): HTMLInputElement | null {
+  const matchesTarget = (input: Element): boolean => {
+    const radioInput = input as HTMLInputElement;
+    return radioInput.name === `multiselect_${select.id}` && radioInput.value === option.value;
+  };
+  const root = select.closest(SUBJECT_SELECTOR);
+  const scopedRadio = root ? Array.from(root.querySelectorAll('input[type="radio"]')).find(matchesTarget) : undefined;
+  return (scopedRadio ||
+    Array.from(document.querySelectorAll('input[type="radio"]')).find(matchesTarget) ||
+    null) as HTMLInputElement | null;
+}
+
+function clickClozeRadio(radio: HTMLInputElement): void {
+  const clickable = radio.closest('label') || radio;
+  (clickable as HTMLElement).click();
+}
+
+function syncClozeMultiselect(select: HTMLSelectElement, option: HTMLOptionElement): boolean {
   const button = select.id ? document.getElementById(`${select.id}_ms`) : select.nextElementSibling;
   const buttonLabel = button?.querySelector('span:last-child');
   if (buttonLabel) buttonLabel.textContent = option.textContent?.trim() || option.label;
   button?.classList.remove('gray');
 
-  const radio = Array.from(document.querySelectorAll('input[type="radio"]')).find((input) => {
-    const radioInput = input as HTMLInputElement;
-    return radioInput.name === `multiselect_${select.id}` && radioInput.value === option.value;
-  }) as HTMLInputElement | undefined;
+  const radio = findClozeMultiselectRadio(select, option);
 
-  if (!radio) return;
+  if (!radio) return false;
+
+  clickClozeRadio(radio);
 
   radio.checked = true;
   radio.setAttribute('checked', 'checked');
@@ -196,9 +348,51 @@ function syncClozeMultiselect(select: HTMLSelectElement, option: HTMLOptionEleme
     otherRadio.setAttribute('aria-selected', 'false');
     otherRadio.closest('label')?.classList.remove('ui-state-active');
   });
+
+  return true;
 }
 
-export function fillClozeSelectQuestion(subjectEl: Element, question: Question, answer: AnswerValue): boolean {
+function isSelectFilled(select: HTMLSelectElement, option: HTMLOptionElement): boolean {
+  const radio = findClozeMultiselectRadio(select, option);
+  const angular = readAngularModel(select);
+  return (
+    select.value === option.value && (!radio || radio.checked) && (!angular.available || angular.value === option.value)
+  );
+}
+
+function describeClozeSelectState(select: HTMLSelectElement, option: HTMLOptionElement): string {
+  const radio = findClozeMultiselectRadio(select, option);
+  const angular = readAngularModel(select);
+  return `select=${select.value || '(empty)'}, radio=${radio ? String(radio.checked) : 'missing'}, angular=${
+    angular.available ? angular.value || '(empty)' : 'unavailable'
+  }`;
+}
+
+async function fillSingleClozeSelect(select: HTMLSelectElement, option: HTMLOptionElement): Promise<boolean> {
+  setSelectValue(select, option);
+  dispatchFormEvents(select);
+  triggerAngularUpdate(select, option.value);
+  updateAngularModel(select, option.value);
+  triggerPageJqueryChange(select);
+  syncClozeMultiselect(select, option);
+  triggerPageMultiselectChange(select);
+
+  // 点击 multiselect radio 后插件可能重写 select 值，这里再同步一次并等待 Angular digest。
+  setSelectValue(select, option);
+  dispatchFormEvents(select);
+  triggerAngularUpdate(select, option.value);
+  updateAngularModel(select, option.value);
+  triggerPageJqueryChange(select);
+
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  return isSelectFilled(select, option);
+}
+
+export async function fillClozeSelectQuestion(
+  subjectEl: Element,
+  question: Question,
+  answer: AnswerValue,
+): Promise<boolean> {
   const selects = getClozeSelects(subjectEl);
   if (selects.length === 0) return false;
 
@@ -216,21 +410,27 @@ export function fillClozeSelectQuestion(subjectEl: Element, question: Question, 
   }
 
   let filled = 0;
-  selects.forEach((select, idx) => {
+  for (let idx = 0; idx < selects.length; idx++) {
+    const select = selects[idx];
     const targetLabel = targetLabels[idx];
     const option = Array.from(select.options).find(
       (item) => targetLabel !== null && cleanClozeAnswerLabel(item.textContent || item.label) === targetLabel,
     );
-    if (!option || !targetLabel) return;
+    if (!option || !targetLabel) continue;
 
-    select.value = option.value;
-    option.selected = true;
-    dispatchFormEvents(select);
-    triggerAngularUpdate(select, option.value);
-    syncClozeMultiselect(select, option);
-    filled++;
-    log(`题目 ${question.displayIndex} 下拉空位 ${idx + 1}: 已选择 ${targetLabel}`);
-  });
+    const ok = await fillSingleClozeSelect(select, option);
+    if (ok) {
+      filled++;
+      log(`题目 ${question.displayIndex} 下拉空位 ${idx + 1}: 已选择 ${targetLabel}`);
+    } else {
+      warn(
+        `题目 ${question.displayIndex} 下拉空位 ${idx + 1}: 选择 ${targetLabel} 后读回失败 (${describeClozeSelectState(
+          select,
+          option,
+        )})`,
+      );
+    }
+  }
 
   return filled === selects.length;
 }
