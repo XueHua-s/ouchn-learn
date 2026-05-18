@@ -4,13 +4,12 @@
 
 import type { Question } from '@/types/exam';
 import { IMAGE_HINT_KEYWORDS, SUB_INDEX_MULTIPLIER, log, warn } from '@/types/exam';
-import { buildClozeDescription, extractClozeOptions } from './cloze-select';
+import { buildClozeQuestionData, isClozeElement } from './cloze-select';
 import { detectQuestionType, extractQuestionImages } from './question-detect';
 import {
   ANALYSIS_PARENT_CLASS,
   BLANK_ANSWER_SELECTOR,
   BLANK_IN_DESCRIPTION_SELECTOR,
-  CLOZE_SELECT_SELECTOR,
   OPTION_SELECTOR,
   SUBJECT_DESCRIPTION_SELECTOR,
   SUBJECT_INDEX_SELECTORS,
@@ -364,20 +363,25 @@ export function extractQuestions(): Question[] {
     const images = extractQuestionImages(element);
     const hasImage = images.length > 0;
 
+    // 完形填空题的全部派生字段（description/rawText/选项/空位数/modelHint）一次性算出，
+    // 避免上层散落多处 querySelector(CLOZE_SELECT_SELECTOR) 复述同一判断。
+    const clozeData = type === 'fill_in_blank' && isClozeElement(element) ? buildClozeQuestionData(element) : null;
+
     // 检测填空空位数（去重：同一个元素只算一次）
     let blankCount = 0;
     if (type === 'fill_in_blank') {
-      const clozeSelects = new Set(Array.from(element.querySelectorAll(CLOZE_SELECT_SELECTOR)));
-      const descBlanks = new Set(Array.from(element.querySelectorAll(BLANK_IN_DESCRIPTION_SELECTOR)));
-      if (clozeSelects.size > 0) {
-        blankCount = clozeSelects.size;
-      } else if (descBlanks.size > 0) {
-        blankCount = descBlanks.size;
+      if (clozeData) {
+        blankCount = clozeData.blankCount;
       } else {
-        const allBlanks = new Set(
-          Array.from(element.querySelectorAll(`${BLANK_ANSWER_SELECTOR}, [contenteditable="true"]`)),
-        );
-        blankCount = allBlanks.size;
+        const descBlanks = new Set(Array.from(element.querySelectorAll(BLANK_IN_DESCRIPTION_SELECTOR)));
+        if (descBlanks.size > 0) {
+          blankCount = descBlanks.size;
+        } else {
+          const allBlanks = new Set(
+            Array.from(element.querySelectorAll(`${BLANK_ANSWER_SELECTOR}, [contenteditable="true"]`)),
+          );
+          blankCount = allBlanks.size;
+        }
       }
     }
 
@@ -395,18 +399,12 @@ export function extractQuestions(): Question[] {
     if (blankCount > 1) {
       modelHints.push(`此题有 ${blankCount} 个空位，请返回数组答案`);
     }
-    if (type === 'fill_in_blank' && element.querySelector(CLOZE_SELECT_SELECTOR)) {
-      modelHints.push('此题是完形填空/补全对话，空位为下拉选项，请按空位顺序返回选项字母数组，如 ["A","D"]');
+    if (clozeData) {
+      modelHints.push(clozeData.modelHint);
     }
 
-    const descriptionForModel =
-      type === 'fill_in_blank' && element.querySelector(CLOZE_SELECT_SELECTOR)
-        ? buildClozeDescription(element)
-        : description;
-    const rawText =
-      type === 'fill_in_blank' && element.querySelector(CLOZE_SELECT_SELECTOR)
-        ? descriptionForModel
-        : element.textContent?.trim() || '';
+    const descriptionForModel = clozeData?.description ?? description;
+    const rawText = clozeData?.rawText ?? (element.textContent?.trim() || '');
 
     const question: Question = {
       index,
@@ -429,8 +427,8 @@ export function extractQuestions(): Question[] {
       question.options = extractChoiceOptions(element);
     }
 
-    if (type === 'fill_in_blank' && element.querySelector(CLOZE_SELECT_SELECTOR)) {
-      question.options = extractClozeOptions(element);
+    if (clozeData) {
+      question.options = clozeData.options;
     }
 
     // unknown 类型也尝试提取选项（万一有选项结构）

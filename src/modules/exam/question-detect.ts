@@ -4,6 +4,7 @@
 
 import type { QuestionType, QuestionImage } from '@/types/exam';
 import { TYPE_TEXT_MAP, TYPE_CLASS_MAP, warn } from '@/types/exam';
+import { isClozeElement } from './cloze-select';
 import { SUBJECT_DESCRIPTION_SELECTOR } from './selectors';
 
 type Html2Canvas = (element: Element, options?: Record<string, unknown>) => Promise<HTMLCanvasElement>;
@@ -34,9 +35,10 @@ export function detectQuestionType(element: Element): { type: QuestionType; rawT
     }
   }
 
-  // OUCHN 完形填空/补全对话题：题干内嵌隐藏 select.___select-answer，语义上仍走填空工具。
+  // OUCHN 完形填空/补全对话题：题干内嵌隐藏 select，语义上仍走填空工具。
   // 必须早于 radio 兜底，因为 jQuery multiselect 菜单内部也会生成 radio。
-  if (element.classList.contains('cloze') || element.querySelector('select.___select-answer, select[multi-select]')) {
+  // `class=cloze` 已由 TYPE_CLASS_MAP 提前命中，这里只补 DOM 侧的兜底。
+  if (isClozeElement(element)) {
     return { type: 'fill_in_blank', rawTypeText: typeText || 'inferred_cloze_select_blank' };
   }
 

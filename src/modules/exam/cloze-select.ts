@@ -1,56 +1,108 @@
 /**
  * OUCHN 完形填空/补全对话下拉题兼容层。
- * 对 provider 仍暴露为 answer_blank，DOM 细节集中封装在这里。
+ *
+ * 对外只暴露 5 个稳定 API：
+ * - `isClozeElement(el)`        — 判定一个 DOM 元素是不是完形填空题
+ * - `isClozeSelectQuestion(q)`  — 判定一个已抽取的 Question 是不是完形填空题（无 DOM 访问）
+ * - `buildClozeQuestionData(el)` — 抽取完形填空题给 AI 用的 description / rawText / 选项
+ * - `validateClozeAnswers(q,a)` — 校验答案能否一一映射到选项标签
+ * - `fillClozeSelectQuestion()` — 把答案回填到隐藏 select + multiselect + Angular 三套状态
+ *
+ * 其余辅助函数（含 DOM/Angular/jQuery 细节）一律对外不可见，避免再被外层模块直接拼接。
  */
 
 import type { AnswerValue, Question } from '@/types/exam';
 import { isValidAnswer, log, warn } from '@/types/exam';
+import { getPageWindow, type AngularParse } from '@/utils/page-runtime';
 import { triggerAngularUpdate } from './answer-write';
 import { CLOZE_SELECT_SELECTOR, SUBJECT_SELECTOR } from './selectors';
-
-type PageWindow = Window &
-  typeof globalThis & {
-    angular?: {
-      element: (el: Element) => {
-        controller?: (name: string) => AngularNgModelController | undefined;
-        injector?: () => { get?: (name: string) => unknown } | undefined;
-        scope?: () => AngularScope | undefined;
-        isolateScope?: () => AngularScope | undefined;
-      };
-    };
-    jQuery?: JQueryStatic;
-    $?: JQueryStatic;
-  };
-
-type AngularScope = {
-  $apply?: () => void;
-  $eval?: (expression: string, locals?: Record<string, unknown>) => unknown;
-  $evalAsync?: () => void;
-  [key: string]: unknown;
-};
-
-type AngularNgModelController = {
-  $setViewValue?: (value: string) => void;
-  $render?: () => void;
-  $modelValue?: unknown;
-  $viewValue?: unknown;
-};
-
-type AngularParseResult = {
-  assign?: (scope: AngularScope, value: unknown) => void;
-};
-
-type AngularParse = (expression: string) => AngularParseResult;
 
 type AngularModelRead = {
   available: boolean;
   value: string;
 };
 
-function getPageWindow(element?: Element): PageWindow {
-  const unsafeWin = (globalThis as unknown as { unsafeWindow?: PageWindow }).unsafeWindow;
-  return unsafeWin || (element?.ownerDocument.defaultView as PageWindow | null) || (window as unknown as PageWindow);
+/** 完形填空题给 Question 用的全部派生字段 */
+export type ClozeQuestionData = {
+  blankCount: number;
+  description: string;
+  rawText: string;
+  modelHint: string;
+  options: NonNullable<Question['options']>;
+};
+
+/** 完形填空题答案校验结果（不依赖 tool-contract，便于上层 mapping） */
+export type ClozeValidationResult =
+  | { ok: true; labels: string[] }
+  | { ok: false; reason: 'blank_count_mismatch'; expected: number; actual: number }
+  | { ok: false; reason: 'unknown_option_label'; value: string };
+
+// ============================================================
+// Public API
+// ============================================================
+
+/**
+ * 仅依据 DOM 判断元素是否是完形填空题（含 `select.___select-answer` 或带匹配 ng-model 的 multiselect）。
+ * 这是 cloze 检测的唯一事实来源，外层不再裸用 `querySelector(CLOZE_SELECT_SELECTOR)`。
+ */
+export function isClozeElement(element: Element): boolean {
+  return element.querySelector(CLOZE_SELECT_SELECTOR) != null;
 }
+
+/** 基于已抽取的 Question 元信息判断（无需 DOM）：tool 校验阶段使用 */
+export function isClozeSelectQuestion(question: Question): boolean {
+  return (
+    question.type === 'fill_in_blank' &&
+    (question.rawClassName.includes('cloze') ||
+      question.rawTypeText.includes('完形填空') ||
+      Boolean(question.options?.length && question.modelHints.some((hint) => hint.includes('完形填空'))))
+  );
+}
+
+/**
+ * 抽取完形填空题给 AI 用的展示数据 + 选项 + 空位数。
+ * 仅当 `isClozeElement(element)` 为真时调用；普通填空题不走这里。
+ */
+export function buildClozeQuestionData(element: Element): ClozeQuestionData {
+  const selects = getClozeSelects(element);
+  const description = buildClozeDescription(element);
+  const options = extractClozeOptions(element);
+  return {
+    blankCount: selects.length,
+    description,
+    // FIXED: 完形填空给模型看的 rawText 必须与 description 一致——若退回 element.textContent，
+    //        Angular multiselect 渲染出的占位符（"-请选择-"等）会污染上下文，让 AI 把空位
+    //        当成已答状态。
+    rawText: description,
+    modelHint: '此题是完形填空/补全对话，空位为下拉选项，请按空位顺序返回选项字母数组，如 ["A","D"]',
+    options,
+  };
+}
+
+/**
+ * 校验填空答案是否能一一映射到下拉选项。
+ * 不依赖任何 tool-contract 类型；上层负责把 `reason` 翻译成自家错误格式。
+ */
+export function validateClozeAnswers(question: Question, answers: string[]): ClozeValidationResult {
+  const parsedAnswers = parseClozeAnswers(question, answers.length === 1 ? answers[0] : answers);
+  if (question.blankCount > 0 && parsedAnswers.length !== question.blankCount) {
+    return { ok: false, reason: 'blank_count_mismatch', expected: question.blankCount, actual: parsedAnswers.length };
+  }
+
+  const labels: string[] = [];
+  for (const answer of parsedAnswers) {
+    const label = resolveClozeAnswerLabel(question, answer);
+    if (!label) {
+      return { ok: false, reason: 'unknown_option_label', value: answer };
+    }
+    labels.push(label);
+  }
+  return { ok: true, labels };
+}
+
+// ============================================================
+// 内部：题干/选项文本解析
+// ============================================================
 
 function normalizeInlineText(text: string): string {
   return text.replace(/[\s\u00a0]+/g, ' ').trim();
@@ -60,7 +112,7 @@ function normalizeAnswerContent(text: string): string {
   return normalizeInlineText(text).toLowerCase();
 }
 
-export function cleanClozeAnswerLabel(answer: string): string {
+function cleanClozeAnswerLabel(answer: string): string {
   return answer
     .trim()
     .replace(/[.、．\s]/g, '')
@@ -92,11 +144,11 @@ function cloneWithoutClozeWidgetNoise(element: Element): Element {
   return cloned;
 }
 
-export function extractCleanClozeText(element: Element): string {
+function extractCleanClozeText(element: Element): string {
   return normalizeInlineText(cloneWithoutClozeWidgetNoise(element).textContent || element.textContent || '');
 }
 
-export function findPreviousClozeInstructionText(element: Element): string {
+function findPreviousClozeInstructionText(element: Element): string {
   let prev = element.previousElementSibling;
   while (prev) {
     if (prev.matches(SUBJECT_SELECTOR)) {
@@ -111,14 +163,14 @@ export function findPreviousClozeInstructionText(element: Element): string {
   return '';
 }
 
-export function buildClozeDescription(element: Element): string {
+function buildClozeDescription(element: Element): string {
   const cleanText = extractCleanClozeText(element);
   const instructionText = findPreviousClozeInstructionText(element);
   const parts = [instructionText, cleanText].filter(Boolean);
   return Array.from(new Set(parts)).join('\n\n');
 }
 
-export function extractClozeOptions(element: Element): NonNullable<Question['options']> {
+function extractClozeOptions(element: Element): NonNullable<Question['options']> {
   const firstSelect = element.querySelector(CLOZE_SELECT_SELECTOR) as HTMLSelectElement | null;
   if (!firstSelect) return [];
   const instructionOptions = parseInstructionOptions(findPreviousClozeInstructionText(element));
@@ -131,15 +183,21 @@ export function extractClozeOptions(element: Element): NonNullable<Question['opt
     });
 }
 
-export function isClozeSelectQuestion(question: Question): boolean {
-  return (
-    question.type === 'fill_in_blank' &&
-    (question.rawClassName.includes('cloze') ||
-      question.rawTypeText.includes('完形填空') ||
-      Boolean(question.options?.length && question.modelHints.some((hint) => hint.includes('完形填空'))))
-  );
-}
+// ============================================================
+// 内部：答案解析与匹配
+// ============================================================
 
+/**
+ * 把 AI 返回的字符串答案切成单空答案数组。
+ *
+ * 解析策略按"信号强度"降序尝试，命中即返回，避免噪声分支被低优先级解析覆盖：
+ *  1. JSON：AI 在 system prompt 中被要求返回 JSON 数组 / 对象，最稳；
+ *  2. 显式分隔符（| / ; / , / 顿号 / 换行）：人类约定写法，绝大多数 batch 答案命中此路；
+ *  3. 空白切分：仅当全部分片都形如 "A"/"B."/"C、" 这种"字母 + 可选标点"时才采纳，
+ *     防止把整段英文当成多空答案；
+ *  4. 紧凑字母串（如 "ABCD"）：仅当长度等于 blankCount 且每个字符都是合法选项标签时采纳；
+ *  5. 兜底：作为单空答案原样返回。
+ */
 function parseClozeAnswerString(question: Question, rawAnswer: string): string[] {
   const text = rawAnswer.trim();
   if (!text) return [];
@@ -169,13 +227,13 @@ function parseClozeAnswerString(question: Question, rawAnswer: string): string[]
   return [text];
 }
 
-export function parseClozeAnswers(question: Question, answer: AnswerValue): string[] {
+function parseClozeAnswers(question: Question, answer: AnswerValue): string[] {
   if (Array.isArray(answer)) return answer.map(String).filter(Boolean);
   if (answer && typeof answer === 'object') return Object.values(answer).map(String).filter(Boolean);
   return parseClozeAnswerString(question, String(answer));
 }
 
-export function resolveClozeAnswerLabel(question: Question, answer: string): string | null {
+function resolveClozeAnswerLabel(question: Question, answer: string): string | null {
   const cleanLabel = cleanClozeAnswerLabel(answer);
   const options = question.options || [];
   if (options.some((option) => cleanClozeAnswerLabel(option.label) === cleanLabel)) return cleanLabel;
@@ -204,7 +262,11 @@ export function resolveClozeAnswerLabel(question: Question, answer: string): str
   return null;
 }
 
-export function getClozeSelects(subjectEl: Element): HTMLSelectElement[] {
+// ============================================================
+// 内部：DOM / Angular / jQuery 同步原语
+// ============================================================
+
+function getClozeSelects(subjectEl: Element): HTMLSelectElement[] {
   return Array.from(subjectEl.querySelectorAll(CLOZE_SELECT_SELECTOR)) as HTMLSelectElement[];
 }
 
@@ -368,6 +430,17 @@ function describeClozeSelectState(select: HTMLSelectElement, option: HTMLOptionE
   }`;
 }
 
+/**
+ * 把一个 select 的状态同步到三套表示（原生 select / jQuery multiselect / Angular ng-model）。
+ *
+ * 策略：write → click → re-write → verify。
+ *  1. 第一轮：直接 set 原生 select.value + 派发 input/change + 推动 Angular ngModel + 点 multiselect radio。
+ *  2. 第二轮：再次 set 原生值——multiselect 的 radio click handler 会在自己的 change 周期里覆写 select.value，
+ *     不重写一次会导致 page-side state 与 ngModel 短暂错位。
+ *  3. 等 80ms 让 Angular digest 跑完，再读回三处状态做 verify。
+ *
+ * 注意：单轮 write 通过 jQuery multiselect 的提交回调读回值时已经被 plugin 改回，必须二轮 write。
+ */
 async function fillSingleClozeSelect(select: HTMLSelectElement, option: HTMLOptionElement): Promise<boolean> {
   setSelectValue(select, option);
   dispatchFormEvents(select);
@@ -377,7 +450,6 @@ async function fillSingleClozeSelect(select: HTMLSelectElement, option: HTMLOpti
   syncClozeMultiselect(select, option);
   triggerPageMultiselectChange(select);
 
-  // 点击 multiselect radio 后插件可能重写 select 值，这里再同步一次并等待 Angular digest。
   setSelectValue(select, option);
   dispatchFormEvents(select);
   triggerAngularUpdate(select, option.value);
@@ -387,6 +459,10 @@ async function fillSingleClozeSelect(select: HTMLSelectElement, option: HTMLOpti
   await new Promise((resolve) => setTimeout(resolve, 80));
   return isSelectFilled(select, option);
 }
+
+// ============================================================
+// Public：填写入口
+// ============================================================
 
 export async function fillClozeSelectQuestion(
   subjectEl: Element,

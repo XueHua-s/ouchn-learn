@@ -3,30 +3,7 @@
  */
 
 import { warn } from '@/types/exam';
-
-type AngularNgModelController = {
-  $setViewValue?: (value: string) => void;
-  $render?: () => void;
-};
-
-type AngularElement = {
-  controller: (name: string) => AngularNgModelController | undefined;
-  scope?: () => { $apply?: () => void } | undefined;
-};
-
-type AngularGlobal = {
-  element: (el: HTMLElement) => AngularElement;
-};
-
-type PageWindow = Window &
-  typeof globalThis & {
-    angular?: AngularGlobal;
-  };
-
-function getPageWindow(element?: Element): PageWindow {
-  const unsafeWin = (globalThis as unknown as { unsafeWindow?: PageWindow }).unsafeWindow;
-  return unsafeWin || (element?.ownerDocument.defaultView as PageWindow | null) || (window as unknown as PageWindow);
-}
+import { getPageWindow } from '@/utils/page-runtime';
 
 /** 触发 AngularJS $setViewValue + $apply */
 export function triggerAngularUpdate(el: HTMLElement, value: string): void {
@@ -34,7 +11,7 @@ export function triggerAngularUpdate(el: HTMLElement, value: string): void {
     const ng = getPageWindow(el).angular;
     if (!ng) return;
     const ngEl = ng.element(el);
-    const ctrl = ngEl.controller('ngModel');
+    const ctrl = ngEl.controller?.('ngModel');
     if (ctrl?.$setViewValue) {
       ctrl.$setViewValue(value);
       ctrl.$render?.();

@@ -6,7 +6,7 @@ import type { AnswerValue, Question, QuestionType } from '@/types/exam';
 import { isValidAnswer } from '@/types/exam';
 import { findQuestionElement } from './question-extract';
 import { fillAnswerForQuestion } from './answer-fill';
-import { isClozeSelectQuestion, parseClozeAnswers, resolveClozeAnswerLabel } from './cloze-select';
+import { isClozeSelectQuestion, validateClozeAnswers } from './cloze-select';
 import {
   buildExamTool,
   createToolError,
@@ -201,29 +201,24 @@ function validateBlankAnswers(question: Question, answers: string[]): ExamToolRe
   }
 
   if (isClozeSelectQuestion(question)) {
-    const parsedAnswers = parseClozeAnswers(question, answers.length === 1 ? answers[0] : answers);
-    if (question.blankCount > 0 && parsedAnswers.length !== question.blankCount) {
+    const result = validateClozeAnswers(question, answers);
+    if (result.ok) return null;
+    if (result.reason === 'blank_count_mismatch') {
       return createToolError({
         tool: 'answer_blank',
         questionIndex: question.index,
         code: 'blank_count_mismatch',
-        message: `题目 ${question.displayIndex}: 下拉空位需要 ${question.blankCount} 个答案，实际 ${parsedAnswers.length} 个`,
+        message: `题目 ${question.displayIndex}: 下拉空位需要 ${result.expected} 个答案，实际 ${result.actual} 个`,
         retryable: true,
       });
     }
-
-    const unknown = parsedAnswers.find((answer) => !resolveClozeAnswerLabel(question, answer));
-    if (unknown) {
-      return createToolError({
-        tool: 'answer_blank',
-        questionIndex: question.index,
-        code: 'unknown_option_label',
-        message: `题目 ${question.displayIndex}: 未识别下拉选项 "${unknown}"`,
-        retryable: true,
-      });
-    }
-
-    return null;
+    return createToolError({
+      tool: 'answer_blank',
+      questionIndex: question.index,
+      code: 'unknown_option_label',
+      message: `题目 ${question.displayIndex}: 未识别下拉选项 "${result.value}"`,
+      retryable: true,
+    });
   }
 
   if (question.blankCount > 1 && answers.length > 1 && answers.length !== question.blankCount) {
