@@ -39,7 +39,7 @@ export function PanelShell({ children, id, title }: PanelShellProps) {
           </div>
           <div className="min-w-0">
             <h3 className="m-0 truncate text-sm font-semibold text-slate-950">{title}</h3>
-            <p className="m-0 mt-0.5 text-xs text-slate-500">React 19 + Zustand 控制台</p>
+            <p className="m-0 mt-0.5 text-xs text-slate-500">学习任务控制台</p>
           </div>
         </div>
         <div className="flex items-center gap-2">

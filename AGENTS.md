@@ -3,7 +3,7 @@
 ## First Read
 
 - `CLAUDE.md` 是 Claude 的入口文件；开始任何 `ouchn-learn` 工作前先读它，再回到本文件。
-- `.claude/`、`.agents/`、`.specs/` 是本地私有工作目录，已被 `.gitignore` 忽略，不应提交；若本地存在对应技能索引，可作为可选补充读取。
+- Claude 需要本地技能时读取 `.claude/skills.md`；Codex CLI 读取 `.agents/skills.md`。
 - 本项目没有默认入口 skill，根据任务类型在 Skill Routing 中选择。
 
 ## Project Overview

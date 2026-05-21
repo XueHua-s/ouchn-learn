@@ -10,7 +10,6 @@ const PROVIDER_RETRY_COUNT = 2;
 const PROVIDER_RETRY_MIN_TIMEOUT_MS = 1500;
 const PROVIDER_RETRY_MAX_TIMEOUT_MS = 4000;
 const PROVIDER_RETRY_FACTOR = PROVIDER_RETRY_MAX_TIMEOUT_MS / PROVIDER_RETRY_MIN_TIMEOUT_MS;
-const PROVIDER_REQUEST_TIMEOUT_MS = 60000;
 
 function createHttpError(status: number, responseText: string): HttpError {
   const err = new Error(`${status}: ${responseText.substring(0, 300)}`) as HttpError;
@@ -82,90 +81,7 @@ export function appendQueryParam(url: string, key: string, value: string): strin
   return `${urlWithoutHash}${urlWithoutHash.includes('?') ? '&' : '?'}${key}=${encodeURIComponent(value)}${hash}`;
 }
 
-function normalizeHostname(hostname: string): string {
-  return hostname.replace(/^\[/, '').replace(/\]$/, '').toLowerCase();
-}
-
-function isPrivateIpv4Host(hostname: string): boolean {
-  const parts = hostname.split('.').map((part) => Number(part));
-  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
-    return false;
-  }
-
-  const [first, second] = parts;
-  return (
-    first === 10 ||
-    first === 127 ||
-    (first === 172 && second >= 16 && second <= 31) ||
-    (first === 192 && second === 168) ||
-    (first === 169 && second === 254)
-  );
-}
-
-function isPrivateIpv6Host(hostname: string): boolean {
-  return hostname === '::1' || hostname.startsWith('fc') || hostname.startsWith('fd') || hostname.startsWith('fe80:');
-}
-
-function isIntranetHostname(hostname: string): boolean {
-  return (
-    hostname === 'localhost' ||
-    hostname === 'host.docker.internal' ||
-    hostname.endsWith('.local') ||
-    hostname.endsWith('.lan') ||
-    hostname.endsWith('.internal') ||
-    !hostname.includes('.')
-  );
-}
-
-function isAllowedHttpProviderHost(hostname: string): boolean {
-  const normalizedHostname = normalizeHostname(hostname);
-  return (
-    isIntranetHostname(normalizedHostname) ||
-    isPrivateIpv4Host(normalizedHostname) ||
-    isPrivateIpv6Host(normalizedHostname)
-  );
-}
-
-function validateProviderUrl(url: string): void {
-  let parsedUrl: URL;
-  try {
-    parsedUrl = new URL(url);
-  } catch {
-    throw new Error('AI Base URL 格式无效');
-  }
-
-  // FIXED: 自定义 OpenAI/Claude 兼容代理是既有能力，内网 HTTP 代理不能被 React 迁移误伤。
-  //        公网仍要求 HTTPS，避免 API Key 被明文发送到非受信网络。
-  if (
-    parsedUrl.protocol !== 'https:' &&
-    !(parsedUrl.protocol === 'http:' && isAllowedHttpProviderHost(parsedUrl.hostname))
-  ) {
-    throw new Error('AI Base URL 必须使用 HTTPS 或本机/内网地址');
-  }
-  if (parsedUrl.username || parsedUrl.password) {
-    throw new Error('AI Base URL 不能包含用户名或密码');
-  }
-}
-
-async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
-  const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), PROVIDER_REQUEST_TIMEOUT_MS);
-
-  try {
-    return await fetch(url, { ...init, signal: controller.signal });
-  } catch (err) {
-    if (err instanceof DOMException && err.name === 'AbortError') {
-      throw new Error('网络请求超时');
-    }
-    throw err;
-  } finally {
-    window.clearTimeout(timeoutId);
-  }
-}
-
 export function requestJson<T>(url: string, init: RequestInit): Promise<T> {
-  validateProviderUrl(url);
-
   const gmRequest = globalThis.GM_xmlhttpRequest;
   if (typeof gmRequest === 'function') {
     return new Promise((resolve, reject) => {
@@ -175,7 +91,6 @@ export function requestJson<T>(url: string, init: RequestInit): Promise<T> {
         headers: init.headers as Record<string, string>,
         data: typeof init.body === 'string' ? init.body : undefined,
         responseType: 'json',
-        timeout: PROVIDER_REQUEST_TIMEOUT_MS,
         onload: (response) => {
           if (response.status < 200 || response.status >= 300) {
             const responseText = response.responseText || JSON.stringify(response.response || '');
@@ -198,7 +113,7 @@ export function requestJson<T>(url: string, init: RequestInit): Promise<T> {
     });
   }
 
-  return fetchWithTimeout(url, init).then(async (response) => {
+  return fetch(url, init).then(async (response) => {
     if (!response.ok) {
       const errorText = await response.text();
       throw createHttpError(response.status, errorText);
@@ -208,8 +123,6 @@ export function requestJson<T>(url: string, init: RequestInit): Promise<T> {
 }
 
 export function requestText(url: string, init: RequestInit): Promise<string> {
-  validateProviderUrl(url);
-
   const gmRequest = globalThis.GM_xmlhttpRequest;
   if (typeof gmRequest === 'function') {
     return new Promise((resolve, reject) => {
@@ -218,7 +131,6 @@ export function requestText(url: string, init: RequestInit): Promise<string> {
         url,
         headers: init.headers as Record<string, string>,
         data: typeof init.body === 'string' ? init.body : undefined,
-        timeout: PROVIDER_REQUEST_TIMEOUT_MS,
         onload: (response) => {
           const responseText = response.responseText || String(response.response || '');
           if (response.status < 200 || response.status >= 300) {
@@ -233,7 +145,7 @@ export function requestText(url: string, init: RequestInit): Promise<string> {
     });
   }
 
-  return fetchWithTimeout(url, init).then(async (response) => {
+  return fetch(url, init).then(async (response) => {
     const responseText = await response.text();
     if (!response.ok) {
       throw createHttpError(response.status, responseText);

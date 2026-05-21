@@ -6,6 +6,4 @@ local
 extension
 .idea
 .vscode
-.specs/
-.agents/
-.claude/
+.specs/scratchpad/
