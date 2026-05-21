@@ -16,6 +16,12 @@ Use this file when Codex CLI is working inside `ouchn-learn`. Do not load the en
   Use for reviewing the current diff and prioritizing bugs, regressions, and missing tests.
 - `skills/frontend-design/SKILL.md`
   Use for panel UI, interaction design, and visual quality work.
+- `skills/product-designer/SKILL.md`
+  Use for product design, user journey maps, information architecture, usability testing, and design system planning.
+- `skills/vercel-react-best-practices/SKILL.md`
+  Use for React/Next.js performance optimization, bundle size reduction, eliminating data-fetching waterfalls, and re-render optimization when relevant React/Next.js code exists or the task explicitly asks for it.
+- `skills/zustand/SKILL.md`
+  Use for Zustand store code, action layering, slice organization, and state management patterns when relevant Zustand code exists or the task explicitly asks for it.
 - `skills/sdd-plan/SKILL.md`
   Use for SDD (Specification Driven Development) task refinement. Drives a 6-phase multi-agent workflow (Parallel Analysis → Architecture Synthesis → Decomposition → Parallelize → Verify → Promote) that turns a `.specs/tasks/draft/*.md` file into a fully planned task in `.specs/tasks/todo/`. Pair with `skills/sdd-plan/analyse-business-requirements.md` for the business-analysis stage.
 
