@@ -26,7 +26,11 @@ export function FullScreenPanel() {
         icon={<Archive className="h-4 w-4" />}
         title="学习资源"
       >
-        <Button disabled={state.isSavingResources} onClick={() => void state.startSaveAllResources()}>
+        <Button
+          className="w-full"
+          disabled={state.isSavingResources}
+          onClick={() => void state.startSaveAllResources()}
+        >
           <Save className="h-4 w-4" />
           {state.isSavingResources ? '保存中...' : '保存所有学习资源'}
         </Button>

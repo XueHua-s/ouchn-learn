@@ -37,7 +37,7 @@ export function FormField({
         <Textarea id={id} onChange={handleChange} placeholder={placeholder} rows={rows} value={value} />
       ) : (
         <Input
-          className={type === 'number' ? 'w-20 text-center' : undefined}
+          className={type === 'number' ? 'w-20 text-center' : 'w-full'}
           id={id}
           max={max}
           min={min}

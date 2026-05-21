@@ -35,7 +35,7 @@ export function Button({ className, size = 'default', type = 'button', variant =
   return (
     <button
       className={cn(
-        'inline-flex w-full items-center justify-center gap-2 rounded-md font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50',
+        'inline-flex items-center justify-center gap-2 rounded-md font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50',
         'cursor-pointer border border-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-700',
         buttonVariants[variant],
         buttonSizes[size],
@@ -51,7 +51,7 @@ export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElem
   return (
     <input
       className={cn(
-        'flex h-9 w-full rounded-md border border-slate-300 bg-white px-3 py-1 text-sm text-slate-950 shadow-sm transition-colors placeholder:text-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-700 disabled:cursor-not-allowed disabled:opacity-50',
+        'flex h-9 rounded-md border border-slate-300 bg-white px-3 py-1 text-sm text-slate-950 shadow-sm transition-colors placeholder:text-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-700 disabled:cursor-not-allowed disabled:opacity-50',
         className,
       )}
       {...props}
@@ -94,8 +94,8 @@ export function PanelSection({ action, children, description, icon, title }: Pan
             </div>
           ) : null}
           <div className="min-w-0">
-            <h4 className="truncate text-sm font-semibold text-slate-950">{title}</h4>
-            {description ? <p className="mt-0.5 text-xs text-slate-500">{description}</p> : null}
+            <h4 className="m-0 truncate text-sm font-semibold text-slate-950">{title}</h4>
+            {description ? <p className="m-0 mt-0.5 text-xs text-slate-500">{description}</p> : null}
           </div>
         </div>
         {action}

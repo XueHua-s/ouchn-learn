@@ -98,11 +98,11 @@ export function ExamPanel() {
       </PanelSection>
 
       <div className="grid grid-cols-2 gap-2">
-        <Button disabled={state.isRunning} onClick={() => void state.runExam()}>
+        <Button className="w-full" disabled={state.isRunning} onClick={() => void state.runExam()}>
           <PlayCircle className="h-4 w-4" />
           {state.isRunning ? '处理中...' : '开始答题'}
         </Button>
-        <Button onClick={state.saveConfig} variant="secondary">
+        <Button className="w-full" onClick={state.saveConfig} variant="secondary">
           <Save className="h-4 w-4" />
           保存配置
         </Button>

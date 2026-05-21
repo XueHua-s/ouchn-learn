@@ -37,7 +37,11 @@ export function CoursePanel() {
         icon={<BookOpenCheck className="h-4 w-4" />}
         title="一键查看"
       >
-        <Button onClick={() => void state.startAutoView()} variant={state.isAutoViewing ? 'warning' : 'default'}>
+        <Button
+          className="w-full"
+          onClick={() => void state.startAutoView()}
+          variant={state.isAutoViewing ? 'warning' : 'default'}
+        >
           {state.isAutoViewing ? <Square className="h-4 w-4" /> : <PlayCircle className="h-4 w-4" />}
           {state.isAutoViewing ? '停止查看' : '查看所有页面'}
         </Button>
@@ -62,6 +66,7 @@ export function CoursePanel() {
           />
         </FieldRow>
         <Button
+          className="w-full"
           disabled={state.isMaterialDownloading}
           onClick={() => void state.startMaterialDownload()}
           variant="secondary"
@@ -93,7 +98,11 @@ export function CoursePanel() {
             value={state.hangIntervalSeconds || DEFAULT_HANG_INTERVAL}
           />
         </FieldRow>
-        <Button onClick={() => void state.startAutoHang()} variant={state.isAutoHanging ? 'warning' : 'success'}>
+        <Button
+          className="w-full"
+          onClick={() => void state.startAutoHang()}
+          variant={state.isAutoHanging ? 'warning' : 'success'}
+        >
           {state.isAutoHanging ? <Square className="h-4 w-4" /> : <PlayCircle className="h-4 w-4" />}
           {state.isAutoHanging ? '停止挂机' : '一键全部挂机'}
         </Button>
