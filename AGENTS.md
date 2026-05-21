@@ -27,15 +27,17 @@
 ## Project Structure
 
 - `src/index.ts`: 脚本主入口，IIFE 自执行。
+- `src/renderer/`: React 19 面板渲染入口与组件。
+- `src/store/`: Zustand 状态管理。
+- `src/services/`: React UI 与业务模块之间的适配层。
 - `src/modules/`: 功能模块。
-  - `auto-exam.ts`: AI 自动答题（调用外部 API）。
+  - `exam/`: AI 自动答题（题目提取、Provider 调用、答案回填）。
   - `auto-hang.ts`: 视频自动挂机。
   - `auto-view.ts`: 自动查看页面。
   - `auto-material-download.ts`: 参考资料下载。
-  - `auto-save-resources.ts`: 批量资源保存。
+  - `save-resources/`: 批量资源保存。
   - `resource-download.ts`: 资源下载核心。
   - `legacy-hang.ts`: 遗留挂机逻辑。
-  - `panel.ts`: UI 操作面板。
   - `styles.ts`: CSS 样式注入。
 - `src/utils/`: 工具函数。
   - `dom.ts`: DOM 操作辅助。

@@ -4,6 +4,10 @@ export default defineConfig({
   entry: ['src/index.ts'],
   outDir: 'dist',
   format: ['iife'],
+  platform: 'browser',
+  define: {
+    'process.env.NODE_ENV': '"production"',
+  },
   clean: true,
   minify: false,
   sourcemap: false,
@@ -22,6 +26,8 @@ export default defineConfig({
 // @require      https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js
 // @require      https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js
 // @grant        GM_download
+// @grant        GM_getValue
+// @grant        GM_setValue
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
 // @connect      *

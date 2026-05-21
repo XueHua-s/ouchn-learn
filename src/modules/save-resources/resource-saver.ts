@@ -15,6 +15,8 @@ type JsPdfInstance = {
 
 type JsPdfConstructor = new (orientation: string, unit: string, format: string) => JsPdfInstance;
 
+const RESOURCE_DOWNLOAD_TIMEOUT_MS = 60000;
+
 // ============================================================
 // 文件名 / 下载辅助
 // ============================================================
@@ -39,7 +41,29 @@ function getCurrentFileName(): string {
  * 下载文件并保存
  */
 async function downloadFile(url: string, filename: string, ensureExtension = false): Promise<void> {
-  const response = await fetch(url);
+  const parsedUrl = new URL(url, window.location.href);
+  if (parsedUrl.username || parsedUrl.password) {
+    throw new Error('下载地址不能包含用户名或密码');
+  }
+  if (parsedUrl.protocol !== 'https:' && parsedUrl.origin !== window.location.origin) {
+    throw new Error('下载地址必须使用 HTTPS 或同源地址');
+  }
+
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), RESOURCE_DOWNLOAD_TIMEOUT_MS);
+  let response: Response;
+
+  try {
+    response = await fetch(parsedUrl.toString(), { signal: controller.signal });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error('下载超时');
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+
   if (!response.ok) {
     throw new Error(`下载失败: ${response.statusText}`);
   }

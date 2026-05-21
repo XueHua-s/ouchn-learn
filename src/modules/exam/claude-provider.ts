@@ -52,8 +52,10 @@ function isOfficialAnthropicBaseUrl(apiBaseUrl: string): boolean {
 }
 
 function hasClaudeCodeSignal(config: ExamConfig): boolean {
-  return /claude[-_\s]?code|beta=true|oauth|sk-ant-oat/i.test(
-    `${config.apiBaseUrl} ${config.apiKey} ${config.modelName}`,
+  return (
+    /claude[-_\s]?code|beta=true|oauth/i.test(config.apiBaseUrl) ||
+    /claude[-_\s]?code/i.test(config.modelName) ||
+    /^sk-ant-oat/i.test(config.apiKey)
   );
 }
 

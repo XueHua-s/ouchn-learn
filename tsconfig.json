@@ -3,6 +3,7 @@
     "target": "ES2020",
     "module": "ESNext",
     "lib": ["ES2020", "DOM"],
+    "jsx": "react-jsx",
     "moduleResolution": "bundler",
     "esModuleInterop": true,
     "strict": true,
@@ -15,12 +16,12 @@
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
     "forceConsistentCasingInFileNames": true,
-    "types": ["jquery", "tampermonkey", "node"],
+    "types": ["jquery", "tampermonkey"],
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"]
     }
   },
-  "include": ["src/**/*", "*.ts"],
+  "include": ["src/**/*", "*.ts", "*.tsx"],
   "exclude": ["node_modules", "dist"]
 }

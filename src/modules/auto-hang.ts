@@ -1,21 +1,50 @@
 import type { HangInfo, ActivityReadRequest, ActivityReadResponse } from '@/types';
 import { API_BASE_URL, DEFAULT_HANG_INTERVAL } from '@/constants';
 import { ensureAllSectionsExpanded } from '@/utils/dom';
+import type { TaskCallbacks, TaskStatusType } from '@/services/task-contracts';
 
 let isAutoHanging = false;
 let hangQueue: HangInfo[] = [];
 let currentHangIndex = 0;
+let autoHangCallbacks: TaskCallbacks | null = null;
+let autoHangGetIntervalSeconds: (() => number) | null = null;
+let autoHangIntervalSeconds = 0;
+// FIXED: 停止后快速重启时，旧异步展开流程或旧定时器不能继续消费新的 hangQueue。
+//        这个 run token 是跨定时器/异步边界的幂等保护，删除会重新引入串扰。
+let autoHangRunId = 0;
+let autoHangTimer: number | null = null;
+
+function setAutoHangRunning(running: boolean): void {
+  autoHangCallbacks?.onRunningChange?.(running);
+
+  const button = $('#auto-hang-all-btn');
+  if (!button.length) return;
+
+  if (running) {
+    button.text('停止挂机').removeClass('ouchn-btn-success').addClass('ouchn-btn-warning');
+  } else {
+    button.text('一键全部挂机').removeClass('ouchn-btn-warning').addClass('ouchn-btn-success');
+  }
+}
 
 /**
  * 更新挂机状态
  */
-export function updateAutoHangStatus(message: string, type: 'info' | 'success' | 'warning' = 'info'): void {
+export function updateAutoHangStatus(message: string, type: TaskStatusType = 'info'): void {
+  autoHangCallbacks?.onStatus({ message, type });
+  const classType = type === 'error' ? 'warning' : type;
+
   const statusEl = $('#auto-hang-status');
+  if (!statusEl.length) {
+    console.log(`[一键挂机] ${message}`);
+    return;
+  }
+
   statusEl
     .show()
     .text(message)
     .removeClass('ouchn-status-info ouchn-status-success ouchn-status-warning')
-    .addClass(`ouchn-status-${type}`);
+    .addClass(`ouchn-status-${classType}`);
   console.log(`[一键挂机] ${message}`);
 }
 
@@ -70,15 +99,18 @@ export async function startAutoHangAll(): Promise<void> {
   }
 
   isAutoHanging = true;
-  $('#auto-hang-all-btn').text('停止挂机').removeClass('ouchn-btn-success').addClass('ouchn-btn-warning');
+  const runId = ++autoHangRunId;
+  setAutoHangRunning(true);
 
   // 检查并展开所有章节
   updateAutoHangStatus('检查课程章节状态...', 'info');
   await ensureAllSectionsExpanded();
+  if (!isAutoHanging || runId !== autoHangRunId) return;
 
   updateAutoHangStatus('正在扫描未完成的视频...', 'info');
 
   hangQueue = scanHangButtons();
+  if (!isAutoHanging || runId !== autoHangRunId) return;
 
   if (hangQueue.length === 0) {
     updateAutoHangStatus('没有找到需要挂机的视频！', 'warning');
@@ -89,13 +121,15 @@ export async function startAutoHangAll(): Promise<void> {
   updateAutoHangStatus(`找到 ${hangQueue.length} 个视频需要挂机，开始自动挂机...`, 'success');
   currentHangIndex = 0;
 
-  processNextHang();
+  processNextHang(runId);
 }
 
 /**
  * 处理下一个挂机任务
  */
-export function processNextHang(): void {
+export function processNextHang(runId = autoHangRunId): void {
+  if (runId !== autoHangRunId) return;
+
   if (!isAutoHanging) {
     updateAutoHangStatus('已停止', 'warning');
     return;
@@ -108,7 +142,11 @@ export function processNextHang(): void {
   }
 
   const hangInfo = hangQueue[currentHangIndex];
-  const interval = parseInt($('#auto-hang-interval').val() as string) || DEFAULT_HANG_INTERVAL;
+  const interval =
+    autoHangGetIntervalSeconds?.() ||
+    autoHangIntervalSeconds ||
+    parseInt($('#auto-hang-interval').val() as string) ||
+    DEFAULT_HANG_INTERVAL;
 
   updateAutoHangStatus(`正在挂机 (${currentHangIndex + 1}/${hangQueue.length}): ${hangInfo.title}`, 'info');
   console.log('[一键挂机] 挂机:', hangInfo.title, '时长:', hangInfo.time);
@@ -118,8 +156,9 @@ export function processNextHang(): void {
   currentHangIndex++;
   updateAutoHangStatus(`挂机成功，等待 ${interval} 秒后继续...`, 'success');
 
-  setTimeout(() => {
-    processNextHang();
+  autoHangTimer = window.setTimeout(() => {
+    autoHangTimer = null;
+    processNextHang(runId);
   }, interval * 1000);
 }
 
@@ -128,7 +167,12 @@ export function processNextHang(): void {
  */
 export function stopAutoHanging(): void {
   isAutoHanging = false;
-  $('#auto-hang-all-btn').text('一键全部挂机').removeClass('ouchn-btn-warning').addClass('ouchn-btn-success');
+  autoHangRunId++;
+  if (autoHangTimer !== null) {
+    window.clearTimeout(autoHangTimer);
+    autoHangTimer = null;
+  }
+  setAutoHangRunning(false);
 }
 
 /**
@@ -152,4 +196,14 @@ export function requestActivitiesRead(id: string, end: string, $button: JQuery):
       }
     },
   });
+}
+
+export async function startAutoHangAllWithCallbacks(
+  input: { getIntervalSeconds?: () => number; intervalSeconds: number },
+  callbacks: TaskCallbacks,
+): Promise<void> {
+  autoHangCallbacks = callbacks;
+  autoHangGetIntervalSeconds = input.getIntervalSeconds || null;
+  autoHangIntervalSeconds = input.intervalSeconds || DEFAULT_HANG_INTERVAL;
+  return startAutoHangAll();
 }

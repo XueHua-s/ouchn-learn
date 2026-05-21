@@ -1,19 +1,46 @@
 import type { PageElement } from '@/types';
 import { saveViewState, getViewState, clearViewState, saveReturnUrl, getReturnUrl } from '@/utils/storage';
 import { waitForPageReady, ensureAllSectionsExpanded } from '@/utils/dom';
+import type { TaskCallbacks, TaskStatusType } from '@/services/task-contracts';
+import { toStatusType } from '@/services/task-contracts';
 
 let isAutoViewing = false;
+let autoViewCallbacks: TaskCallbacks | null = null;
+// FIXED: 停止后如果旧的等待/跳转流程继续执行，会误点下一个页面。
+//        run token 贯穿异步边界，确保只有当前任务能点击或跳转。
+let autoViewRunId = 0;
+
+function setAutoViewRunning(running: boolean): void {
+  autoViewCallbacks?.onRunningChange?.(running);
+
+  const button = $('#auto-view-pages-btn');
+  if (!button.length) return;
+
+  if (running) {
+    button.text('停止查看').removeClass('ouchn-btn-primary').addClass('ouchn-btn-warning');
+  } else {
+    button.text('一键查看所有页面').removeClass('ouchn-btn-warning').addClass('ouchn-btn-primary');
+  }
+}
 
 /**
  * 更新自动查看状态
  */
-export function updateAutoViewStatus(message: string, type: 'info' | 'success' | 'warning' = 'info'): void {
+export function updateAutoViewStatus(message: string, type: TaskStatusType = 'info'): void {
+  autoViewCallbacks?.onStatus({ message, type });
+  const classType = type === 'error' ? 'warning' : type;
+
   const statusEl = $('#auto-view-status');
+  if (!statusEl.length) {
+    console.log(`[自动查看页面] ${message}`);
+    return;
+  }
+
   statusEl
     .show()
     .text(message)
     .removeClass('ouchn-status-info ouchn-status-success ouchn-status-warning')
-    .addClass(`ouchn-status-${type}`);
+    .addClass(`ouchn-status-${classType}`);
   console.log(`[自动查看页面] ${message}`);
 }
 
@@ -74,11 +101,13 @@ export async function startAutoViewPages(): Promise<void> {
   }
 
   isAutoViewing = true;
-  $('#auto-view-pages-btn').text('停止查看').removeClass('ouchn-btn-primary').addClass('ouchn-btn-warning');
+  const runId = ++autoViewRunId;
+  setAutoViewRunning(true);
 
   // 检查并展开所有章节
   updateAutoViewStatus('检查课程章节状态...', 'info');
   await ensureAllSectionsExpanded();
+  if (!isAutoViewing || runId !== autoViewRunId) return;
 
   updateAutoViewStatus('正在扫描未完成的页面...', 'info');
 
@@ -102,24 +131,33 @@ export async function startAutoViewPages(): Promise<void> {
   updateAutoViewStatus(`找到 ${pageElements.length} 个需要查看的页面，开始自动查看...`, 'success');
 
   setTimeout(() => {
-    processNextPageWithState();
+    if (!isAutoViewing || runId !== autoViewRunId) return;
+    processNextPageWithState(runId);
   }, 500);
 }
 
 /**
  * 处理下一个页面
  */
-export async function processNextPageWithState(): Promise<void> {
+export async function processNextPageWithState(runId = autoViewRunId): Promise<void> {
   const state = getViewState();
-  if (!state || !state.isActive) {
+  if (!isAutoViewing || runId !== autoViewRunId || !state || !state.isActive) {
     console.log('[自动查看页面] 没有活动的查看任务');
     return;
   }
 
-  await waitForPageReady((msg, type) => updateAutoViewStatus(msg, type as 'info' | 'success' | 'warning'));
+  await waitForPageReady((msg, type) => updateAutoViewStatus(msg, toStatusType(type)));
+  if (!isAutoViewing || runId !== autoViewRunId) return;
+
+  const latestState = getViewState();
+  if (!latestState || !latestState.isActive) {
+    console.log('[自动查看页面] 查看任务已停止');
+    return;
+  }
 
   console.log('[自动查看页面] 重新扫描页面...');
   const currentPageList = scanAndGetClickableElements();
+  if (!isAutoViewing || runId !== autoViewRunId) return;
 
   if (currentPageList.length === 0) {
     updateAutoViewStatus('✅ 所有页面已查看完成！', 'success');
@@ -128,16 +166,17 @@ export async function processNextPageWithState(): Promise<void> {
     return;
   }
 
-  const processedCount = state.processedCount || 0;
+  const processedCount = latestState.processedCount || 0;
   updateAutoViewStatus(`正在查看第 ${processedCount + 1} 个: ${currentPageList[0].title}`, 'info');
 
   console.log('[自动查看页面] 点击:', currentPageList[0].title);
+  if (!isAutoViewing || runId !== autoViewRunId || !getViewState()?.isActive) return;
   currentPageList[0].element.click();
 
   saveViewState({
     isActive: true,
     processedCount: processedCount + 1,
-    returnUrl: state.returnUrl,
+    returnUrl: latestState.returnUrl,
   });
 
   console.log('[自动查看页面] 等待页面跳转...');
@@ -148,7 +187,8 @@ export async function processNextPageWithState(): Promise<void> {
  */
 export function stopAutoViewing(): void {
   isAutoViewing = false;
-  $('#auto-view-pages-btn').text('一键查看所有页面').removeClass('ouchn-btn-warning').addClass('ouchn-btn-primary');
+  autoViewRunId++;
+  setAutoViewRunning(false);
 }
 
 /**
@@ -165,16 +205,18 @@ export async function checkAndResumeAutoView(): Promise<void> {
   console.log('[自动查看页面] 检测到活动状态，当前URL:', window.location.href);
   console.log('[自动查看页面] 返回URL:', returnUrl);
 
+  isAutoViewing = true;
+  const runId = ++autoViewRunId;
+  setAutoViewRunning(true);
+
   if (returnUrl && window.location.href === returnUrl) {
     console.log('[自动查看页面] 检测到返回目标页面，继续执行...');
-
-    isAutoViewing = true;
-    $('#auto-view-pages-btn').text('停止查看').removeClass('ouchn-btn-primary').addClass('ouchn-btn-warning');
 
     updateAutoViewStatus(`继续自动查看 (已处理 ${state.processedCount || 0} 个)...`, 'info');
 
     setTimeout(() => {
-      processNextPageWithState();
+      if (!isAutoViewing || runId !== autoViewRunId) return;
+      processNextPageWithState(runId);
     }, 500);
   } else {
     console.log('[自动查看页面] 当前在查看页面中，等待页面稳定...');
@@ -182,14 +224,26 @@ export async function checkAndResumeAutoView(): Promise<void> {
 
     updateAutoViewStatus('查看页面中...', 'info');
 
-    await waitForPageReady((msg, type) => updateAutoViewStatus(msg, type as 'info' | 'success' | 'warning'));
+    await waitForPageReady((msg, type) => updateAutoViewStatus(msg, toStatusType(type)));
+    if (!isAutoViewing || runId !== autoViewRunId || !getViewState()?.isActive) return;
     console.log('[自动查看页面] 查看页面已稳定，准备返回...');
 
     setTimeout(() => {
+      if (!isAutoViewing || runId !== autoViewRunId || !getViewState()?.isActive) return;
       console.log('[自动查看页面] 跳转回课程页面');
       if (returnUrl) {
         window.location.href = returnUrl;
       }
     }, 1000);
   }
+}
+
+export async function startAutoViewPagesWithCallbacks(callbacks: TaskCallbacks): Promise<void> {
+  autoViewCallbacks = callbacks;
+  return startAutoViewPages();
+}
+
+export async function checkAndResumeAutoViewWithCallbacks(callbacks: TaskCallbacks): Promise<void> {
+  autoViewCallbacks = callbacks;
+  return checkAndResumeAutoView();
 }
