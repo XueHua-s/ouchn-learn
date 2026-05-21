@@ -16,7 +16,7 @@
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
     "forceConsistentCasingInFileNames": true,
-    "types": ["jquery", "tampermonkey", "node"],
+    "types": ["jquery", "tampermonkey"],
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"]

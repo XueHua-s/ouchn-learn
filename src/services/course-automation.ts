@@ -13,7 +13,7 @@ export const courseAutomationService: CourseAutomationService = {
     return startAutoMaterialDownloadWithCallbacks(input, callbacks);
   },
 
-  startAutoHangAll(input: { intervalSeconds: number }, callbacks: TaskCallbacks) {
+  startAutoHangAll(input: { getIntervalSeconds?: () => number; intervalSeconds: number }, callbacks: TaskCallbacks) {
     return startAutoHangAllWithCallbacks(input, callbacks);
   },
 

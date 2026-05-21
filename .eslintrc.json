@@ -38,6 +38,8 @@
     "$": "readonly",
     "jQuery": "readonly",
     "GM_download": "readonly",
+    "GM_getValue": "readonly",
+    "GM_setValue": "readonly",
     "GM_xmlhttpRequest": "readonly"
   },
   "ignorePatterns": [

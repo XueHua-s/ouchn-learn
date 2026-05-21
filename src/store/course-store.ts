@@ -23,8 +23,8 @@ interface CourseStore {
   startSaveAllResources: () => Promise<void>;
 }
 
-function clampNumber(value: number, min: number, max: number): number {
-  if (!Number.isFinite(value)) return min;
+function clampNumber(value: number, min: number, max: number, fallback: number): number {
+  if (!Number.isFinite(value) || value <= 0) return fallback;
   return Math.min(max, Math.max(min, Math.round(value)));
 }
 
@@ -47,13 +47,16 @@ export const useCourseStore = create<CourseStore>((set, get) => ({
     });
   },
 
-  setHangIntervalSeconds: (value) => set({ hangIntervalSeconds: clampNumber(value, 10, 300) }),
-  setMaterialIntervalSeconds: (value) => set({ materialIntervalSeconds: clampNumber(value, 5, 60) }),
+  setHangIntervalSeconds: (value) => set({ hangIntervalSeconds: clampNumber(value, 10, 300, DEFAULT_HANG_INTERVAL) }),
+  setMaterialIntervalSeconds: (value) => set({ materialIntervalSeconds: clampNumber(value, 5, 60, 10) }),
 
   startAutoHang: async () => {
     const { hangIntervalSeconds } = get();
     await courseAutomationService.startAutoHangAll(
-      { intervalSeconds: hangIntervalSeconds },
+      {
+        getIntervalSeconds: () => get().hangIntervalSeconds || DEFAULT_HANG_INTERVAL,
+        intervalSeconds: hangIntervalSeconds,
+      },
       {
         onStatus: (autoHangStatus) => set({ autoHangStatus }),
         onRunningChange: (isAutoHanging) => set({ isAutoHanging }),

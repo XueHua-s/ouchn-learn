@@ -77,7 +77,7 @@ function emitStatus(callbacks: ExamRunnerCallbacks, message: string, type: TaskS
 }
 
 export function validateExamConfig(config: ExamConfig): boolean {
-  return !!(config.modelName && config.apiKey && config.apiBaseUrl);
+  return !!(config.modelName.trim() && config.apiKey.trim() && config.apiBaseUrl.trim());
 }
 
 export async function runAutoExam(config: ExamConfig, callbacks: ExamRunnerCallbacks): Promise<void> {

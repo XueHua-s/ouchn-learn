@@ -22,7 +22,10 @@ export interface TaskCallbacks {
 export interface CourseAutomationService {
   startAutoViewPages(callbacks: TaskCallbacks): Promise<void>;
   startMaterialDownload(input: { intervalSeconds: number }, callbacks: TaskCallbacks): Promise<void>;
-  startAutoHangAll(input: { intervalSeconds: number }, callbacks: TaskCallbacks): Promise<void>;
+  startAutoHangAll(
+    input: { getIntervalSeconds?: () => number; intervalSeconds: number },
+    callbacks: TaskCallbacks,
+  ): Promise<void>;
   saveAllResources(callbacks: TaskCallbacks): Promise<void>;
   checkAndResumeAutoView(callbacks: TaskCallbacks): Promise<void>;
 }

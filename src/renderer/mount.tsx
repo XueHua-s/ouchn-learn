@@ -9,8 +9,10 @@ let root: Root | null = null;
 let routeListenersAttached = false;
 let routePollTimer: number | null = null;
 let retryTimer: number | null = null;
+let lastObservedHref = window.location.href;
 
 function updatePageMode(): void {
+  lastObservedHref = window.location.href;
   usePanelStore.getState().setPageMode(detectPageMode());
 }
 
@@ -36,15 +38,13 @@ function attachRouteListeners(): void {
 function startRoutePolling(): void {
   if (routePollTimer !== null) return;
 
-  let checkCount = 0;
+  // OUCHN 的 Angular/Vue 页面存在只调用 history.pushState/replaceState 的跳转；
+  // hashchange/popstate 不一定触发，因此持续轻量比较 URL，只有变化时才更新 store。
   routePollTimer = window.setInterval(() => {
-    checkCount++;
+    if (window.location.href === lastObservedHref) return;
+    lastObservedHref = window.location.href;
     updatePageMode();
-    if (checkCount >= 10 && routePollTimer !== null) {
-      window.clearInterval(routePollTimer);
-      routePollTimer = null;
-    }
-  }, 3000);
+  }, 1000);
 }
 
 export function mountOuchnRenderer(): void {
