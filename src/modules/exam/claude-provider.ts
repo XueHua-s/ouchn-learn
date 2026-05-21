@@ -1,15 +1,7 @@
 import type { ExamConfig } from '@/types/exam';
 import { warn } from '@/types/exam';
 import { sanitizeImageDataUri } from './question-detect';
-import {
-  appendQueryParam,
-  getErrorText,
-  getHttpStatus,
-  isRateLimitError,
-  RATE_LIMIT_MAX_ATTEMPTS,
-  requestJson,
-  waitBeforeRateLimitRetry,
-} from './provider-http';
+import { appendQueryParam, getErrorText, requestJson, requestWithProviderRetry } from './provider-http';
 
 type ClaudeTextContent = { type: 'text'; text: string };
 type ClaudeImageContent = { type: 'image'; source: { type: 'base64'; media_type: string; data: string } };
@@ -25,10 +17,15 @@ type UrlParts = {
   basePath: string;
   suffix: string;
 };
+type ClaudeMode = 'claude-code' | 'standard';
 
 const CLAUDE_CODE_SYSTEM_PROMPT = "You are Claude Code, Anthropic's official CLI for Claude.";
 const CLAUDE_CODE_BETA_HEADER = 'oauth-2025-04-20,interleaved-thinking-2025-05-14,claude-code-20250219';
 const CLAUDE_CODE_USER_AGENT = 'claude-cli/2.1.2 (external, cli)';
+const CLAUDE_MODE_LABELS: Record<ClaudeMode, string> = {
+  'claude-code': 'Claude Code 兼容调用',
+  standard: '标准 Anthropic API',
+};
 
 function splitUrlSuffix(url: string): UrlParts {
   const trimmedUrl = url.trim();
@@ -54,19 +51,22 @@ function isOfficialAnthropicBaseUrl(apiBaseUrl: string): boolean {
   }
 }
 
-function shouldTryClaudeCodeFallback(config: ExamConfig, err: unknown): boolean {
-  const errorText = getErrorText(err);
-  const isOfficialAnthropic = isOfficialAnthropicBaseUrl(config.apiBaseUrl);
-  if (isOfficialAnthropic) {
-    return false;
-  }
-  if (/claude\s*code|anthropic-beta|oauth|beta=true|bearer/i.test(errorText)) {
-    return true;
+function hasClaudeCodeSignal(config: ExamConfig): boolean {
+  return /claude[-_\s]?code|beta=true|oauth|sk-ant-oat/i.test(
+    `${config.apiBaseUrl} ${config.apiKey} ${config.modelName}`,
+  );
+}
+
+function getClaudeAttemptOrder(config: ExamConfig): ClaudeMode[] {
+  const shouldPreferClaudeCode = hasClaudeCodeSignal(config) || !isOfficialAnthropicBaseUrl(config.apiBaseUrl);
+
+  // FIXED: Claude Code 代理通常要求 Bearer + beta=true 调用形态；先按 Code 模式探测，
+  //        失败后自动回退标准 Anthropic。官方 Anthropic 默认仍只走标准 API，避免错误发送 OAuth beta header。
+  if (shouldPreferClaudeCode) {
+    return ['claude-code', 'standard'];
   }
 
-  // FIXED: 部分 Claude 兼容代理把标准 Anthropic header 误报为 429，但官方 Anthropic
-  //        的 429 应继续作为限流处理；否则会把正常标准调用静默改成 Claude Code 协议。
-  return getHttpStatus(err) === 429;
+  return ['standard'];
 }
 
 async function requestClaudeMessagesWithRetry(
@@ -74,32 +74,20 @@ async function requestClaudeMessagesWithRetry(
   url: string,
   headers: Record<string, string>,
   requestBody: ClaudeMessagesRequestBody,
-  shouldStopRetry?: (err: unknown) => boolean,
 ): Promise<string> {
-  let lastError: unknown;
+  return requestWithProviderRetry(providerLabel, async () => {
+    const data = await requestJson<ClaudeMessagesResponse>(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(requestBody),
+    });
 
-  for (let attempt = 0; attempt < RATE_LIMIT_MAX_ATTEMPTS; attempt++) {
-    try {
-      const data = await requestJson<ClaudeMessagesResponse>(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(requestBody),
-      });
-
-      return data.content?.find((part) => part.type === 'text')?.text || '';
-    } catch (err) {
-      lastError = err;
-      if (
-        shouldStopRetry?.(err) ||
-        !isRateLimitError(err) ||
-        !(await waitBeforeRateLimitRetry(providerLabel, attempt))
-      ) {
-        throw err;
-      }
+    const text = data.content?.find((part) => part.type === 'text')?.text || '';
+    if (!text.trim()) {
+      throw new Error(`${providerLabel} 响应缺少 text 内容`);
     }
-  }
-
-  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+    return text;
+  });
 }
 
 function requestStandardClaudeMessages(
@@ -125,7 +113,6 @@ function requestStandardClaudeMessages(
       //        该字段本身可选，省略后使用服务端默认值，避免断点调用整批返回空答案。
       max_tokens: 2048,
     },
-    (err) => shouldTryClaudeCodeFallback(config, err),
   );
 }
 
@@ -157,6 +144,19 @@ function requestClaudeCodeMessages(
   );
 }
 
+function requestClaudeByMode(
+  mode: ClaudeMode,
+  config: ExamConfig,
+  endpoint: string,
+  systemPrompt: string,
+  content: ClaudeUserContent,
+): Promise<string> {
+  if (mode === 'claude-code') {
+    return requestClaudeCodeMessages(config, endpoint, systemPrompt, content);
+  }
+  return requestStandardClaudeMessages(config, endpoint, systemPrompt, content);
+}
+
 export function buildClaudeVisionContent(
   textContent: string,
   imageBase64List: string[],
@@ -181,22 +181,30 @@ export async function callClaude(
 ): Promise<string> {
   const content: ClaudeUserContent = Array.isArray(userContent) ? userContent : [{ type: 'text', text: userContent }];
   const endpoint = buildClaudeMessagesUrl(config.apiBaseUrl);
+  const attemptOrder = getClaudeAttemptOrder(config);
+  const failures: Array<{ mode: ClaudeMode; error: unknown }> = [];
 
-  try {
-    return await requestStandardClaudeMessages(config, endpoint, systemPrompt, content);
-  } catch (err) {
-    if (!shouldTryClaudeCodeFallback(config, err)) {
-      throw err;
-    }
-    warn(`标准 Anthropic API 请求失败，尝试 Claude Code 兼容调用: ${getErrorText(err).substring(0, 160)}`);
+  for (let index = 0; index < attemptOrder.length; index++) {
+    const mode = attemptOrder[index];
     try {
-      return await requestClaudeCodeMessages(config, endpoint, systemPrompt, content);
-    } catch (fallbackErr) {
-      throw new Error(
-        `标准 Anthropic API 失败: ${getErrorText(err).substring(0, 160)}; Claude Code 兼容调用失败: ${getErrorText(
-          fallbackErr,
-        ).substring(0, 300)}`,
-      );
+      return await requestClaudeByMode(mode, config, endpoint, systemPrompt, content);
+    } catch (err) {
+      failures.push({ mode, error: err });
+      const nextMode = attemptOrder[index + 1];
+      if (nextMode) {
+        warn(
+          `${CLAUDE_MODE_LABELS[mode]}失败，尝试${CLAUDE_MODE_LABELS[nextMode]}: ${getErrorText(err).substring(
+            0,
+            160,
+          )}`,
+        );
+      }
     }
   }
+
+  throw new Error(
+    failures
+      .map(({ mode, error: failure }) => `${CLAUDE_MODE_LABELS[mode]}失败: ${getErrorText(failure).substring(0, 240)}`)
+      .join('; '),
+  );
 }

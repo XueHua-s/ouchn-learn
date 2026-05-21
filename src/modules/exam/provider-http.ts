@@ -1,3 +1,4 @@
+import { backOff } from 'exponential-backoff';
 import { warn } from '@/types/exam';
 
 type HttpError = Error & {
@@ -5,8 +6,10 @@ type HttpError = Error & {
   responseText?: string;
 };
 
-const RATE_LIMIT_RETRY_DELAYS_MS = [1500, 4000];
-export const RATE_LIMIT_MAX_ATTEMPTS = RATE_LIMIT_RETRY_DELAYS_MS.length + 1;
+const PROVIDER_RETRY_COUNT = 2;
+const PROVIDER_RETRY_MIN_TIMEOUT_MS = 1500;
+const PROVIDER_RETRY_MAX_TIMEOUT_MS = 4000;
+const PROVIDER_RETRY_FACTOR = PROVIDER_RETRY_MAX_TIMEOUT_MS / PROVIDER_RETRY_MIN_TIMEOUT_MS;
 
 function createHttpError(status: number, responseText: string): HttpError {
   const err = new Error(`${status}: ${responseText.substring(0, 300)}`) as HttpError;
@@ -28,23 +31,44 @@ export function getHttpStatus(err: unknown): number | undefined {
 }
 
 export function isRateLimitError(err: unknown): boolean {
-  return getHttpStatus(err) === 429 || /rate[_ ]?limit/i.test(getErrorText(err));
+  return getHttpStatus(err) === 429 || /(rate[_\s-]?limit|too many requests)/i.test(getErrorText(err));
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, ms);
+export function isRetryableProviderError(err: unknown): boolean {
+  const status = getHttpStatus(err);
+  if (status !== undefined && (status === 408 || status === 429 || status >= 500)) {
+    return true;
+  }
+  return (
+    isRateLimitError(err) ||
+    /(network request failed|网络请求失败|网络请求超时|timeout|overloaded)/i.test(getErrorText(err))
+  );
+}
+
+export function requestWithProviderRetry<T>(
+  provider: string,
+  request: () => Promise<T>,
+  shouldRetry: (err: unknown) => boolean = isRetryableProviderError,
+): Promise<T> {
+  return backOff(request, {
+    numOfAttempts: PROVIDER_RETRY_COUNT + 1,
+    startingDelay: PROVIDER_RETRY_MIN_TIMEOUT_MS,
+    maxDelay: PROVIDER_RETRY_MAX_TIMEOUT_MS,
+    timeMultiple: PROVIDER_RETRY_FACTOR,
+    jitter: 'none',
+    retry: (err, attemptNumber) => {
+      if (!shouldRetry(err) || attemptNumber > PROVIDER_RETRY_COUNT) {
+        return false;
+      }
+      const retryDelay = Math.min(
+        Math.round(PROVIDER_RETRY_MIN_TIMEOUT_MS * PROVIDER_RETRY_FACTOR ** (attemptNumber - 1)),
+        PROVIDER_RETRY_MAX_TIMEOUT_MS,
+      );
+      // FIXED: 代理/上游对 Claude Opus 等模型可能限流较紧；逐题并发时短退避可避免整批空答案。
+      warn(`${provider} 请求失败，${Math.round(retryDelay / 1000)} 秒后自动重试`);
+      return true;
+    },
   });
-}
-
-export async function waitBeforeRateLimitRetry(provider: string, attempt: number): Promise<boolean> {
-  const retryDelay = RATE_LIMIT_RETRY_DELAYS_MS[attempt];
-  if (retryDelay === undefined) return false;
-
-  // FIXED: 代理/上游对 Claude Opus 等模型可能限流较紧；逐题并发时短退避可避免整批空答案。
-  warn(`${provider} 请求被限流，${Math.round(retryDelay / 1000)} 秒后自动重试`);
-  await delay(retryDelay);
-  return true;
 }
 
 export function appendQueryParam(url: string, key: string, value: string): string {

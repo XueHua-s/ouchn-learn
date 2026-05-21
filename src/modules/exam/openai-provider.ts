@@ -1,7 +1,7 @@
 import type { ExamConfig } from '@/types/exam';
 import { REASONING_MODEL_RE, warn } from '@/types/exam';
 import { sanitizeImageDataUri } from './question-detect';
-import { getErrorText, isRateLimitError, requestJson, requestText, waitBeforeRateLimitRetry } from './provider-http';
+import { getErrorText, requestJson, requestText, requestWithProviderRetry } from './provider-http';
 
 type OpenAITextContent = { type: 'text'; text: string };
 type OpenAIImageContent = { type: 'image_url'; image_url: { url: string; detail: 'high' } };
@@ -69,11 +69,15 @@ function buildOpenAIChatCompletionsUrl(apiBaseUrl: string): string {
 }
 
 function isOpenAIStreamRequiredError(err: unknown): boolean {
-  return /stream must be set to true/i.test(getErrorText(err));
+  return /(stream.*(true|required|only|must|enable)|streaming.*(required|only|supported)|only.*stream|non[-\s]?stream.*(unsupported|not supported)|must use.*stream)/i.test(
+    getErrorText(err),
+  );
 }
 
 function isTemperatureUnsupportedError(err: unknown): boolean {
-  return /temperature.*(deprecated|unsupported|not supported|invalid)/i.test(getErrorText(err));
+  return /(temperature.*(deprecated|unsupported|not supported|invalid)|unsupported parameter.*temperature|unrecognized.*temperature|unknown.*temperature)/i.test(
+    getErrorText(err),
+  );
 }
 
 function extractOpenAIContent(content: OpenAIMessageContent | undefined): string {
@@ -167,6 +171,10 @@ async function requestOpenAICompletion(config: ExamConfig, requestBody: OpenAIRe
   return extractOpenAIChatResponse(data);
 }
 
+function requestOpenAICompletionWithRetry(config: ExamConfig, requestBody: OpenAIRequestBody): Promise<string> {
+  return requestWithProviderRetry('OpenAI', () => requestOpenAICompletion(config, requestBody));
+}
+
 export function buildOpenAIVisionContent(
   textContent: string,
   imageBase64List: string[],
@@ -202,7 +210,7 @@ export async function callOpenAI(
     }
 
     try {
-      return await requestOpenAICompletion(config, requestBody);
+      return await requestOpenAICompletionWithRetry(config, requestBody);
     } catch (err) {
       lastError = err;
       let shouldRetry = false;
@@ -221,10 +229,6 @@ export async function callOpenAI(
         }
         streamRequiredCache.add(capabilityCacheKey);
         shouldRetry = true;
-      }
-
-      if (!shouldRetry && isRateLimitError(err)) {
-        shouldRetry = await waitBeforeRateLimitRetry('OpenAI', attempt);
       }
 
       if (!shouldRetry) {
