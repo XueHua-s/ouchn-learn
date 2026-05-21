@@ -53,6 +53,12 @@
   适用于 review 当前 diff，优先报告 bug、风险和测试缺口。
 - `skills/frontend-design/SKILL.md`
   适用于面板 UI、交互和视觉质量提升。
+- `skills/product-designer/SKILL.md`
+  适用于产品设计、用户旅程、信息架构、可用性测试和设计系统规划。
+- `skills/vercel-react-best-practices/SKILL.md`
+  适用于 React/Next.js 性能优化、bundle 体积治理、数据请求瀑布消除和重渲染优化；仅在相关 React/Next.js 代码存在或任务明确要求时使用。
+- `skills/zustand/SKILL.md`
+  适用于 Zustand store、action 分层、slice 组织和状态管理模式；仅在相关 Zustand 代码存在或任务明确要求时使用。
 - `skills/sdd-plan/SKILL.md`
   适用于 SDD（Specification Driven Development）规格驱动开发流程：把 `.specs/tasks/draft/` 中的草稿任务，通过 6 阶段多智能体工作流（Parallel Analysis → Architecture Synthesis → Decomposition → Parallelize → Verify → Promote）逐步细化、并行化、加质量门禁，最终晋升到 `.specs/tasks/todo/`。配合 `skills/sdd-plan/analyse-business-requirements.md` 作为业务分析阶段的子手册。
 
