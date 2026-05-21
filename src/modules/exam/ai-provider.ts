@@ -4,9 +4,11 @@
 
 import pLimit from 'p-limit';
 import type { ExamConfig, Question, AIResponse, ExamStats, AnswerValue } from '@/types/exam';
-import { REASONING_MODEL_RE, log, warn, error, isValidAnswer } from '@/types/exam';
+import { log, warn, error, isValidAnswer } from '@/types/exam';
 import { resolveImageBase64, sanitizeImageDataUri } from './question-detect';
 import { findQuestionElement } from './question-extract';
+import { callClaude, buildClaudeVisionContent } from './claude-provider';
+import { callOpenAI, buildOpenAIVisionContent } from './openai-provider';
 
 type PromptQuestionItem = {
   index: string;
@@ -21,20 +23,6 @@ type PromptQuestionItem = {
   matchingOptions?: string[];
   hints?: string[];
 };
-
-type OpenAITextContent = { type: 'text'; text: string };
-type OpenAIImageContent = { type: 'image_url'; image_url: { url: string; detail: 'high' } };
-type OpenAIUserContent = string | Array<OpenAITextContent | OpenAIImageContent>;
-type OpenAIMessage = { role: 'developer' | 'system' | 'user'; content: OpenAIUserContent };
-type OpenAIRequestBody = {
-  model: string;
-  messages: OpenAIMessage[];
-  temperature?: number;
-};
-
-type ClaudeTextContent = { type: 'text'; text: string };
-type ClaudeImageContent = { type: 'image'; source: { type: 'base64'; media_type: string; data: string } };
-type ClaudeUserContent = string | Array<ClaudeTextContent | ClaudeImageContent>;
 
 type ProviderFailure = {
   questionIndex: number;
@@ -104,147 +92,8 @@ function buildSingleQuestionPrompt(q: Question, customPrompt: string): string {
 }
 
 // ============================================================
-// 多模态消息构建
-// ============================================================
-
-function buildOpenAIVisionContent(
-  textContent: string,
-  imageBase64List: string[],
-): Array<OpenAITextContent | OpenAIImageContent> {
-  const parts: Array<OpenAITextContent | OpenAIImageContent> = [];
-  parts.push({ type: 'text', text: textContent });
-  imageBase64List.forEach((b64) => {
-    const safeUri = sanitizeImageDataUri(b64);
-    if (safeUri) {
-      parts.push({ type: 'image_url', image_url: { url: safeUri, detail: 'high' } });
-    }
-  });
-  return parts;
-}
-
-function buildClaudeVisionContent(
-  textContent: string,
-  imageBase64List: string[],
-): Array<ClaudeTextContent | ClaudeImageContent> {
-  const parts: Array<ClaudeTextContent | ClaudeImageContent> = [];
-  parts.push({ type: 'text', text: textContent });
-  imageBase64List.forEach((b64) => {
-    const safeUri = sanitizeImageDataUri(b64);
-    if (!safeUri) return;
-    const match = safeUri.match(/^data:(image\/[^;]+);base64,(.+)$/s);
-    if (match) {
-      parts.push({ type: 'image', source: { type: 'base64', media_type: match[1], data: match[2] } });
-    }
-  });
-  return parts;
-}
-
-function buildClaudeMessagesUrl(apiBaseUrl: string): string {
-  const baseUrl = apiBaseUrl.replace(/\/+$/, '');
-  return baseUrl.endsWith('/v1') ? `${baseUrl}/messages` : `${baseUrl}/v1/messages`;
-}
-
-function buildApiUrl(baseUrl: string, path: string): string {
-  return `${baseUrl.replace(/\/+$/, '')}${path}`;
-}
-
-function requestJson<T>(url: string, init: RequestInit): Promise<T> {
-  const gmRequest = globalThis.GM_xmlhttpRequest;
-  if (typeof gmRequest === 'function') {
-    return new Promise((resolve, reject) => {
-      gmRequest({
-        method: init.method === 'POST' ? 'POST' : 'GET',
-        url,
-        headers: init.headers as Record<string, string>,
-        data: typeof init.body === 'string' ? init.body : undefined,
-        responseType: 'json',
-        onload: (response) => {
-          if (response.status < 200 || response.status >= 300) {
-            const responseText = response.responseText || JSON.stringify(response.response || '');
-            reject(new Error(`${response.status}: ${responseText.substring(0, 300)}`));
-            return;
-          }
-          if (response.response !== null && response.response !== undefined) {
-            resolve(response.response as T);
-            return;
-          }
-          try {
-            resolve(JSON.parse(response.responseText) as T);
-          } catch (err) {
-            reject(err instanceof Error ? err : new Error(String(err)));
-          }
-        },
-        onerror: () => reject(new Error('网络请求失败')),
-        ontimeout: () => reject(new Error('网络请求超时')),
-      });
-    });
-  }
-
-  return fetch(url, init).then(async (response) => {
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`${response.status}: ${errorText.substring(0, 300)}`);
-    }
-    return (await response.json()) as T;
-  });
-}
-
-// ============================================================
 // API 调用（单次）
 // ============================================================
-
-async function callOpenAI(config: ExamConfig, systemPrompt: string, userContent: OpenAIUserContent): Promise<string> {
-  const isReasoningModel = REASONING_MODEL_RE.test(config.modelName);
-  const messages: OpenAIMessage[] = [];
-
-  if (isReasoningModel) {
-    messages.push({ role: 'developer', content: systemPrompt });
-  } else {
-    messages.push({ role: 'system', content: systemPrompt });
-  }
-  messages.push({ role: 'user', content: userContent });
-
-  const requestBody: OpenAIRequestBody = { model: config.modelName, messages };
-  if (!isReasoningModel) {
-    requestBody.temperature = 0.3;
-  }
-
-  const data = await requestJson<{ choices?: Array<{ message?: { content?: string } }> }>(
-    buildApiUrl(config.apiBaseUrl, '/chat/completions'),
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.apiKey}` },
-      body: JSON.stringify(requestBody),
-    },
-  );
-
-  return data.choices?.[0]?.message?.content || '';
-}
-
-async function callClaude(config: ExamConfig, systemPrompt: string, userContent: ClaudeUserContent): Promise<string> {
-  const content = Array.isArray(userContent) ? userContent : [{ type: 'text', text: userContent }];
-  const data = await requestJson<{ content?: Array<{ type?: string; text?: string }> }>(
-    buildClaudeMessagesUrl(config.apiBaseUrl),
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': config.apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true',
-      },
-      body: JSON.stringify({
-        model: config.modelName,
-        system: systemPrompt,
-        messages: [{ role: 'user', content }],
-        temperature: 0.3,
-        max_tokens: 2048,
-      }),
-    },
-  );
-
-  return data.content?.find((part: { type?: string; text?: string }) => part.type === 'text')?.text || '';
-}
 
 async function callQuestionProvider(
   config: ExamConfig,
