@@ -14,6 +14,14 @@
 - **AI 自动答题**: 支持 OpenAI/Claude 兼容 Provider、独立 Provider 配置、逐题并发、图片题降级、工具化 DOM 回填和统计反馈。
 - **安全存储迁移**: AI API Key 优先保存到 Tampermonkey GM 存储，兼容旧版 localStorage 配置迁移。
 
+## 重构重点
+
+- **渲染层重构**: 删除旧的 jQuery 字符串拼接面板，改为 React 组件化渲染，减少 HTML 注入和状态同步问题。
+- **状态层重构**: 用 Zustand 拆分课程、考试、面板状态，避免 UI 事件和业务流程互相持有过多细节。
+- **服务适配层**: React UI 不直接调用复杂 DOM 逻辑，而是通过 `src/services/*` 转接到业务模块。
+- **AI 工具执行层**: AI 返回答案后先转换为本地受控工具调用，再由工具层校验题型、答案形态、DOM 定位和执行结果。
+- **样式隔离**: 面板样式集中在 `src/modules/styles.ts`，React runtime utilities 限定在 `#ouchn-react-renderer-root` 下，降低污染 OUCHN 页面样式的风险。
+
 ## 目标页面
 
 - `https://lms.ouchn.cn/course/**`: 课程自动查看、视频挂机、资源下载。
@@ -123,6 +131,21 @@ pnpm run format
 4. 面板显示当前状态、进度和工具执行统计。
 
 OpenAI 与 Claude 配置独立保存，切换 Provider 不会覆盖另一套输入。API Key 优先写入 GM 存储；旧版 localStorage 配置会在读取时迁移。
+
+## 配置与存储
+
+- 自动查看状态、返回 URL、课程配置和资料缓存仍使用 `localStorage`，便于跨页面跳转恢复任务。
+- AI 答题配置通过 `src/utils/storage.ts` 统一读写；API Key 优先写入 `GM_setValue`，读取时优先使用 `GM_getValue`。
+- 旧版本保存在 `localStorage` 的 AI 配置会在读取时归一化并迁移到 GM 存储。
+- OpenAI 和 Claude 的模型、API Key、Base URL 独立保存；当前激活 Provider 会镜像到顶层配置，供答题流程使用。
+
+## 常见问题
+
+- **面板没有出现**: 确认 URL 是否匹配 `@match`，并检查 Tampermonkey 中脚本是否启用。
+- **AI 配置保存失败**: 确认 UserScript header 中包含 `GM_getValue` 和 `GM_setValue` grant，并在 Tampermonkey 中重新安装最新构建产物。
+- **AI 返回空答案或部分题跳过**: 查看面板状态和浏览器控制台中的 `ExamStats`，重点检查 Provider Base URL、模型名称、并发数和图片题降级日志。
+- **资源保存中断**: 保存资源和自动查看依赖当前 OUCHN 页面状态，执行期间避免刷新、手动跳转或关闭页面。
+- **样式异常**: 先确认页面里只存在一个 `#ouchn-react-renderer-root`，再检查是否有第三方插件修改了 OUCHN 页面 DOM。
 
 ## 注意事项
 
