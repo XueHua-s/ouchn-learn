@@ -104,6 +104,7 @@ const DECORATIVE_IMAGE_CONTAINER_SELECTOR = [
   '[class*=" icon-"]',
   '.ouchn-panel',
   '.download-panel',
+  '#ouchn-react-renderer-root',
   '#ai-exam-panel',
   '#immersive-translate-popup',
   '.reveal-modal',

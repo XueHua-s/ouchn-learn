@@ -1,21 +1,45 @@
 import type { HangInfo, ActivityReadRequest, ActivityReadResponse } from '@/types';
 import { API_BASE_URL, DEFAULT_HANG_INTERVAL } from '@/constants';
 import { ensureAllSectionsExpanded } from '@/utils/dom';
+import type { TaskCallbacks, TaskStatusType } from '@/services/task-contracts';
 
 let isAutoHanging = false;
 let hangQueue: HangInfo[] = [];
 let currentHangIndex = 0;
+let autoHangCallbacks: TaskCallbacks | null = null;
+let autoHangIntervalSeconds = 0;
+
+function setAutoHangRunning(running: boolean): void {
+  autoHangCallbacks?.onRunningChange?.(running);
+
+  const button = $('#auto-hang-all-btn');
+  if (!button.length) return;
+
+  if (running) {
+    button.text('停止挂机').removeClass('ouchn-btn-success').addClass('ouchn-btn-warning');
+  } else {
+    button.text('一键全部挂机').removeClass('ouchn-btn-warning').addClass('ouchn-btn-success');
+  }
+}
 
 /**
  * 更新挂机状态
  */
-export function updateAutoHangStatus(message: string, type: 'info' | 'success' | 'warning' = 'info'): void {
+export function updateAutoHangStatus(message: string, type: TaskStatusType = 'info'): void {
+  autoHangCallbacks?.onStatus({ message, type });
+  const classType = type === 'error' ? 'warning' : type;
+
   const statusEl = $('#auto-hang-status');
+  if (!statusEl.length) {
+    console.log(`[一键挂机] ${message}`);
+    return;
+  }
+
   statusEl
     .show()
     .text(message)
     .removeClass('ouchn-status-info ouchn-status-success ouchn-status-warning')
-    .addClass(`ouchn-status-${type}`);
+    .addClass(`ouchn-status-${classType}`);
   console.log(`[一键挂机] ${message}`);
 }
 
@@ -70,7 +94,7 @@ export async function startAutoHangAll(): Promise<void> {
   }
 
   isAutoHanging = true;
-  $('#auto-hang-all-btn').text('停止挂机').removeClass('ouchn-btn-success').addClass('ouchn-btn-warning');
+  setAutoHangRunning(true);
 
   // 检查并展开所有章节
   updateAutoHangStatus('检查课程章节状态...', 'info');
@@ -108,7 +132,8 @@ export function processNextHang(): void {
   }
 
   const hangInfo = hangQueue[currentHangIndex];
-  const interval = parseInt($('#auto-hang-interval').val() as string) || DEFAULT_HANG_INTERVAL;
+  const interval =
+    autoHangIntervalSeconds || parseInt($('#auto-hang-interval').val() as string) || DEFAULT_HANG_INTERVAL;
 
   updateAutoHangStatus(`正在挂机 (${currentHangIndex + 1}/${hangQueue.length}): ${hangInfo.title}`, 'info');
   console.log('[一键挂机] 挂机:', hangInfo.title, '时长:', hangInfo.time);
@@ -128,7 +153,7 @@ export function processNextHang(): void {
  */
 export function stopAutoHanging(): void {
   isAutoHanging = false;
-  $('#auto-hang-all-btn').text('一键全部挂机').removeClass('ouchn-btn-warning').addClass('ouchn-btn-success');
+  setAutoHangRunning(false);
 }
 
 /**
@@ -152,4 +177,13 @@ export function requestActivitiesRead(id: string, end: string, $button: JQuery):
       }
     },
   });
+}
+
+export async function startAutoHangAllWithCallbacks(
+  input: { intervalSeconds: number },
+  callbacks: TaskCallbacks,
+): Promise<void> {
+  autoHangCallbacks = callbacks;
+  autoHangIntervalSeconds = input.intervalSeconds || DEFAULT_HANG_INTERVAL;
+  return startAutoHangAll();
 }

@@ -1,19 +1,43 @@
 import type { PageElement } from '@/types';
 import { saveViewState, getViewState, clearViewState, saveReturnUrl, getReturnUrl } from '@/utils/storage';
 import { waitForPageReady, ensureAllSectionsExpanded } from '@/utils/dom';
+import type { TaskCallbacks, TaskStatusType } from '@/services/task-contracts';
+import { toStatusType } from '@/services/task-contracts';
 
 let isAutoViewing = false;
+let autoViewCallbacks: TaskCallbacks | null = null;
+
+function setAutoViewRunning(running: boolean): void {
+  autoViewCallbacks?.onRunningChange?.(running);
+
+  const button = $('#auto-view-pages-btn');
+  if (!button.length) return;
+
+  if (running) {
+    button.text('停止查看').removeClass('ouchn-btn-primary').addClass('ouchn-btn-warning');
+  } else {
+    button.text('一键查看所有页面').removeClass('ouchn-btn-warning').addClass('ouchn-btn-primary');
+  }
+}
 
 /**
  * 更新自动查看状态
  */
-export function updateAutoViewStatus(message: string, type: 'info' | 'success' | 'warning' = 'info'): void {
+export function updateAutoViewStatus(message: string, type: TaskStatusType = 'info'): void {
+  autoViewCallbacks?.onStatus({ message, type });
+  const classType = type === 'error' ? 'warning' : type;
+
   const statusEl = $('#auto-view-status');
+  if (!statusEl.length) {
+    console.log(`[自动查看页面] ${message}`);
+    return;
+  }
+
   statusEl
     .show()
     .text(message)
     .removeClass('ouchn-status-info ouchn-status-success ouchn-status-warning')
-    .addClass(`ouchn-status-${type}`);
+    .addClass(`ouchn-status-${classType}`);
   console.log(`[自动查看页面] ${message}`);
 }
 
@@ -74,7 +98,7 @@ export async function startAutoViewPages(): Promise<void> {
   }
 
   isAutoViewing = true;
-  $('#auto-view-pages-btn').text('停止查看').removeClass('ouchn-btn-primary').addClass('ouchn-btn-warning');
+  setAutoViewRunning(true);
 
   // 检查并展开所有章节
   updateAutoViewStatus('检查课程章节状态...', 'info');
@@ -116,7 +140,7 @@ export async function processNextPageWithState(): Promise<void> {
     return;
   }
 
-  await waitForPageReady((msg, type) => updateAutoViewStatus(msg, type as 'info' | 'success' | 'warning'));
+  await waitForPageReady((msg, type) => updateAutoViewStatus(msg, toStatusType(type)));
 
   console.log('[自动查看页面] 重新扫描页面...');
   const currentPageList = scanAndGetClickableElements();
@@ -148,7 +172,7 @@ export async function processNextPageWithState(): Promise<void> {
  */
 export function stopAutoViewing(): void {
   isAutoViewing = false;
-  $('#auto-view-pages-btn').text('一键查看所有页面').removeClass('ouchn-btn-warning').addClass('ouchn-btn-primary');
+  setAutoViewRunning(false);
 }
 
 /**
@@ -169,7 +193,7 @@ export async function checkAndResumeAutoView(): Promise<void> {
     console.log('[自动查看页面] 检测到返回目标页面，继续执行...');
 
     isAutoViewing = true;
-    $('#auto-view-pages-btn').text('停止查看').removeClass('ouchn-btn-primary').addClass('ouchn-btn-warning');
+    setAutoViewRunning(true);
 
     updateAutoViewStatus(`继续自动查看 (已处理 ${state.processedCount || 0} 个)...`, 'info');
 
@@ -182,7 +206,7 @@ export async function checkAndResumeAutoView(): Promise<void> {
 
     updateAutoViewStatus('查看页面中...', 'info');
 
-    await waitForPageReady((msg, type) => updateAutoViewStatus(msg, type as 'info' | 'success' | 'warning'));
+    await waitForPageReady((msg, type) => updateAutoViewStatus(msg, toStatusType(type)));
     console.log('[自动查看页面] 查看页面已稳定，准备返回...');
 
     setTimeout(() => {
@@ -192,4 +216,14 @@ export async function checkAndResumeAutoView(): Promise<void> {
       }
     }, 1000);
   }
+}
+
+export async function startAutoViewPagesWithCallbacks(callbacks: TaskCallbacks): Promise<void> {
+  autoViewCallbacks = callbacks;
+  return startAutoViewPages();
+}
+
+export async function checkAndResumeAutoViewWithCallbacks(callbacks: TaskCallbacks): Promise<void> {
+  autoViewCallbacks = callbacks;
+  return checkAndResumeAutoView();
 }

@@ -60,6 +60,11 @@ export function injectStyles(): void {
       animation: ouchn-panel-in 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
     }
 
+    #ouchn-react-renderer-root {
+      position: relative;
+      z-index: 999998;
+    }
+
     @keyframes ouchn-panel-in {
       to { opacity: 1; transform: translateY(0) scale(1); }
     }
@@ -216,6 +221,14 @@ export function injectStyles(): void {
       text-align: center;
       border: 1px solid transparent;
       transition: all var(--transition-fast);
+    }
+
+    .ouchn-status-progress {
+      display: inline-block;
+      margin-left: 6px;
+      font-family: var(--font-mono);
+      color: currentColor;
+      opacity: 0.85;
     }
 
     .ouchn-status-info {

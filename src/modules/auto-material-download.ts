@@ -1,4 +1,6 @@
 import { waitForPageReady, ensureAllSectionsExpanded } from '@/utils/dom';
+import type { TaskCallbacks, TaskStatusType } from '@/services/task-contracts';
+import { toStatusType } from '@/services/task-contracts';
 
 interface MaterialActivity {
   element: HTMLElement;
@@ -165,30 +167,22 @@ async function collectMaterialFiles(activity: MaterialActivity): Promise<Downloa
 }
 
 /**
- * 启动批量下载所有参考资料
+ * 执行批量下载所有参考资料
  */
-export async function startAutoMaterialDownload(): Promise<void> {
-  const statusElement = $('#auto-download-status');
-  const btn = $('#auto-download-materials-btn');
-
-  function updateStatus(msg: string, type: string): void {
-    statusElement.text(msg);
-    statusElement.removeClass('ouchn-status-info ouchn-status-success ouchn-status-warning');
-    statusElement.addClass(`ouchn-status-${type}`);
-    statusElement.show();
+async function runAutoMaterialDownload(fileDelay: number, callbacks: TaskCallbacks): Promise<void> {
+  function updateStatus(msg: string, type: TaskStatusType = 'info'): void {
+    callbacks.onStatus({ message: msg, type });
     console.log(`[批量下载] ${msg}`);
   }
 
   try {
-    btn.prop('disabled', true);
+    callbacks.onRunningChange?.(true);
     updateStatus('正在准备...', 'info');
 
-    // 获取文件下载间隔（默认10秒）
-    const fileDelay = parseInt($('#material-download-interval').val() as string) || 10;
     console.log(`[批量下载] 文件下载间隔: ${fileDelay}秒`);
 
     // 等待页面完全加载
-    await waitForPageReady(updateStatus);
+    await waitForPageReady((msg, type) => updateStatus(msg, toStatusType(type)));
 
     // 检查并展开所有章节
     updateStatus('检查课程章节状态...', 'info');
@@ -199,7 +193,6 @@ export async function startAutoMaterialDownload(): Promise<void> {
 
     if (activities.length === 0) {
       updateStatus('未找到参考资料活动', 'warning');
-      btn.prop('disabled', false);
       return;
     }
 
@@ -222,7 +215,6 @@ export async function startAutoMaterialDownload(): Promise<void> {
 
     if (allFiles.length === 0) {
       updateStatus('没有找到可下载的文件', 'warning');
-      btn.prop('disabled', false);
       return;
     }
 
@@ -240,8 +232,37 @@ export async function startAutoMaterialDownload(): Promise<void> {
     console.log(`[批量下载] ========== 全部完成，共下载 ${allFiles.length} 个文件 ==========`);
   } catch (error) {
     console.error('[批量下载] 执行失败:', error);
-    updateStatus(`执行失败: ${error}`, 'warning');
+    updateStatus(`执行失败: ${error}`, 'error');
   } finally {
-    btn.prop('disabled', false);
+    callbacks.onRunningChange?.(false);
   }
+}
+
+/**
+ * 启动批量下载所有参考资料
+ */
+export async function startAutoMaterialDownload(): Promise<void> {
+  const statusElement = $('#auto-download-status');
+  const btn = $('#auto-download-materials-btn');
+  const fileDelay = parseInt($('#material-download-interval').val() as string) || 10;
+
+  return runAutoMaterialDownload(fileDelay, {
+    onStatus(update) {
+      const classType = update.type === 'error' ? 'warning' : update.type;
+      statusElement.text(update.message);
+      statusElement.removeClass('ouchn-status-info ouchn-status-success ouchn-status-warning');
+      statusElement.addClass(`ouchn-status-${classType}`);
+      statusElement.show();
+    },
+    onRunningChange(running) {
+      btn.prop('disabled', running);
+    },
+  });
+}
+
+export async function startAutoMaterialDownloadWithCallbacks(
+  input: { intervalSeconds: number },
+  callbacks: TaskCallbacks,
+): Promise<void> {
+  return runAutoMaterialDownload(input.intervalSeconds || 10, callbacks);
 }

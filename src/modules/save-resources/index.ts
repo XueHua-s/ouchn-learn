@@ -4,24 +4,18 @@
 
 import { expandAllTrees, getAllResourceItems } from './tree-scanner';
 import { processResourceItem } from './resource-saver';
+import type { TaskCallbacks, TaskStatusType } from '@/services/task-contracts';
 
 /**
- * 启动保存所有资源的流程
+ * 执行保存所有资源的流程
  */
-export async function startSaveAllResources(): Promise<void> {
-  const statusElement = $('#save-all-status');
-  const button = $('#save-all-resources-btn');
-
-  // 更新状态显示
-  const updateStatus = (message: string, type: 'info' | 'success' | 'warning' = 'info') => {
-    statusElement.show();
-    statusElement.removeClass('ouchn-status-info ouchn-status-success ouchn-status-warning');
-    statusElement.addClass(`ouchn-status-${type}`);
-    statusElement.text(message);
+async function runSaveAllResources(callbacks: TaskCallbacks): Promise<void> {
+  const updateStatus = (message: string, type: TaskStatusType = 'info') => {
+    callbacks.onStatus({ message, type });
   };
 
   try {
-    button.prop('disabled', true);
+    callbacks.onRunningChange?.(true);
     updateStatus('开始保存资源...');
 
     // 步骤1: 展开所有树形菜单
@@ -37,7 +31,6 @@ export async function startSaveAllResources(): Promise<void> {
 
     if (items.length === 0) {
       updateStatus('未找到可保存的资源', 'warning');
-      button.prop('disabled', false);
       return;
     }
 
@@ -71,8 +64,33 @@ export async function startSaveAllResources(): Promise<void> {
     updateStatus(summary, successCount > 0 ? 'success' : 'warning');
   } catch (error) {
     console.error('[保存资源] 执行出错:', error);
-    updateStatus(`执行出错: ${error}`, 'warning');
+    updateStatus(`执行出错: ${error}`, 'error');
   } finally {
-    button.prop('disabled', false);
+    callbacks.onRunningChange?.(false);
   }
+}
+
+/**
+ * 启动保存所有资源的流程
+ */
+export async function startSaveAllResources(): Promise<void> {
+  const statusElement = $('#save-all-status');
+  const button = $('#save-all-resources-btn');
+
+  return runSaveAllResources({
+    onStatus(update) {
+      const classType = update.type === 'error' ? 'warning' : update.type;
+      statusElement.show();
+      statusElement.removeClass('ouchn-status-info ouchn-status-success ouchn-status-warning');
+      statusElement.addClass(`ouchn-status-${classType}`);
+      statusElement.text(update.message);
+    },
+    onRunningChange(running) {
+      button.prop('disabled', running);
+    },
+  });
+}
+
+export async function startSaveAllResourcesWithCallbacks(callbacks: TaskCallbacks): Promise<void> {
+  return runSaveAllResources(callbacks);
 }
