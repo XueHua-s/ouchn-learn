@@ -22,6 +22,7 @@
 ### 技术栈
 
 - TypeScript
+- React 19 + Zustand (面板渲染与状态管理)
 - tsup (构建工具)
 - ESLint + Prettier (代码质量)
 - Husky + lint-staged (Git Hooks)
@@ -31,15 +32,17 @@
 ```
 src/
 ├── constants/        # 常量定义
-├── modules/          # 功能模块
+├── renderer/         # React 面板渲染入口与组件
+├── store/            # Zustand 状态管理
+├── services/         # UI 与业务模块之间的服务适配层
+├── modules/          # 自动化业务模块
 │   ├── styles.ts                # 样式注入
-│   ├── panel.ts                 # 下载面板
 │   ├── resource-download.ts     # 资源下载
 │   ├── auto-view.ts             # 自动查看页面
 │   ├── auto-hang.ts             # 自动挂机
-│   ├── auto-save-resources.ts   # 批量保存资源
 │   ├── auto-material-download.ts # 参考资料下载
-│   ├── auto-exam.ts              # AI 自动答题
+│   ├── exam/                    # AI 自动答题
+│   ├── save-resources/          # 批量保存资源
 │   └── legacy-hang.ts           # 原有挂机功能
 ├── types/            # 类型定义
 ├── utils/            # 工具函数
@@ -88,8 +91,9 @@ pnpm run format
 
 ### 资源下载
 
-1. 点击 "🔍 扫描当前页面资源" 扫描页面上的可下载资源
-2. 可以单独下载某个资源，或点击 "📦 下载全部资源" 批量下载
+1. 在课程页打开右侧 React 面板
+2. 设置下载间隔后点击 "批量下载参考资料"
+3. 脚本会展开课程章节，收集参考资料附件并依次触发下载
 
 ### 自动查看页面
 

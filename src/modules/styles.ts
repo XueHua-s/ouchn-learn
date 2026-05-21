@@ -12,7 +12,7 @@ export function injectStyles(): void {
       --panel-bg: #1a1d23;
       --panel-surface: #22262e;
       --panel-border: #2e333d;
-      --panel-radius: 10px;
+      --panel-radius: 8px;
 
       --text-primary: #e8eaed;
       --text-secondary: #9aa0a8;
@@ -48,6 +48,7 @@ export function injectStyles(): void {
       top: 80px;
       right: 20px;
       width: 320px;
+      max-width: calc(100vw - 24px);
       background: var(--panel-bg);
       border-radius: var(--panel-radius);
       box-shadow: var(--shadow-panel);
@@ -87,7 +88,7 @@ export function injectStyles(): void {
       font-size: 14px;
       font-weight: 600;
       margin: 0;
-      letter-spacing: 0.3px;
+      letter-spacing: 0;
     }
 
     .ouchn-panel-toggle {
@@ -156,7 +157,7 @@ export function injectStyles(): void {
       cursor: pointer;
       transition: all var(--transition-fast);
       position: relative;
-      letter-spacing: 0.2px;
+      letter-spacing: 0;
     }
 
     .ouchn-btn:active {
@@ -288,7 +289,7 @@ export function injectStyles(): void {
       margin-bottom: 4px;
       font-weight: 500;
       text-transform: uppercase;
-      letter-spacing: 0.5px;
+      letter-spacing: 0;
     }
 
     .ouchn-field {
@@ -336,7 +337,7 @@ export function injectStyles(): void {
       font-size: 12px;
       font-family: var(--font-body);
       transition: all var(--transition-fast);
-      letter-spacing: 0.3px;
+      letter-spacing: 0;
     }
 
     .ouchn-tab:hover {
@@ -355,10 +356,6 @@ export function injectStyles(): void {
       border: none;
       border-top: 1px solid var(--panel-border);
     }
-
-    /* ========== 旧 class 兼容层（过渡用，面板内联模板引用） ========== */
-    .download-panel { /* 兼容旧 panel.ts / exam-panel.ts 的 selector */ }
-    .download-header { /* 兼容 makeDraggable 查找 */ }
   `;
   document.head.appendChild(style);
 }

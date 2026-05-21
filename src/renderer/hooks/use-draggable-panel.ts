@@ -28,8 +28,9 @@ export function useDraggablePanel(
       const onMouseMove = (moveEvent: MouseEvent) => {
         const nextLeft = initialLeft + moveEvent.clientX - startX;
         const nextTop = initialTop + moveEvent.clientY - startY;
+        const maxLeft = Math.max(0, window.innerWidth - rect.width - 8);
         setPosition({
-          left: Math.max(0, nextLeft),
+          left: Math.min(maxLeft, Math.max(0, nextLeft)),
           top: Math.max(0, nextTop),
         });
       };

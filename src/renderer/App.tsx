@@ -10,7 +10,9 @@ export function App() {
   const checkAndResumeAutoView = useCourseStore((state) => state.checkAndResumeAutoView);
 
   useEffect(() => {
-    if (pageMode === 'course') {
+    // FIXED: 自动查看会短暂进入 full-screen 学习活动页；这里必须在 course/full-screen 都恢复，
+    //        否则 React 迁移后只渲染保存资源面板，流程不会跳回课程页继续处理下一项。
+    if (pageMode === 'course' || pageMode === 'full-screen') {
       const timer = window.setTimeout(() => {
         void checkAndResumeAutoView();
       }, 500);

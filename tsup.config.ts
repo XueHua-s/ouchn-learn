@@ -4,6 +4,10 @@ export default defineConfig({
   entry: ['src/index.ts'],
   outDir: 'dist',
   format: ['iife'],
+  platform: 'browser',
+  define: {
+    'process.env.NODE_ENV': '"production"',
+  },
   clean: true,
   minify: false,
   sourcemap: false,
