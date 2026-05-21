@@ -1,8 +1,10 @@
+import { BookOpenCheck, Download, PlayCircle, Square, TimerReset } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import { useCourseStore } from '@/store/course-store';
 import { DEFAULT_HANG_INTERVAL } from '@/constants';
 import { PanelShell } from './PanelShell';
 import { StatusMessage } from './StatusMessage';
+import { Button, FieldRow, Input, PanelSection, Pill } from './ui';
 
 export function CoursePanel() {
   const state = useCourseStore(
@@ -25,65 +27,78 @@ export function CoursePanel() {
 
   return (
     <PanelShell title="资源下载">
-      <button
-        className={`ouchn-btn ${state.isAutoViewing ? 'ouchn-btn-warning' : 'ouchn-btn-primary'}`}
-        onClick={() => void state.startAutoView()}
-        type="button"
+      <PanelSection
+        action={
+          <Pill className={state.isAutoViewing ? 'border-amber-200 bg-amber-50 text-amber-900' : undefined}>
+            {state.isAutoViewing ? '运行中' : '待命'}
+          </Pill>
+        }
+        description="自动打开未完成的查看页面"
+        icon={<BookOpenCheck className="h-4 w-4" />}
+        title="一键查看"
       >
-        {state.isAutoViewing ? '停止查看' : '一键查看所有页面'}
-      </button>
-      <StatusMessage status={state.autoViewStatus} />
+        <Button onClick={() => void state.startAutoView()} variant={state.isAutoViewing ? 'warning' : 'default'}>
+          {state.isAutoViewing ? <Square className="h-4 w-4" /> : <PlayCircle className="h-4 w-4" />}
+          {state.isAutoViewing ? '停止查看' : '查看所有页面'}
+        </Button>
+        <StatusMessage status={state.autoViewStatus} />
+      </PanelSection>
 
-      <hr className="ouchn-divider" />
-
-      <div className="ouchn-input-row">
-        <label className="ouchn-label" htmlFor="material-download-interval">
-          下载间隔(秒)
-        </label>
-        <input
-          className="ouchn-input ouchn-input-sm"
-          id="material-download-interval"
-          max={60}
-          min={5}
-          onChange={(event) => state.setMaterialIntervalSeconds(Number(event.currentTarget.value))}
-          type="number"
-          value={state.materialIntervalSeconds}
-        />
-      </div>
-      <button
-        className="ouchn-btn ouchn-btn-secondary"
-        disabled={state.isMaterialDownloading}
-        onClick={() => void state.startMaterialDownload()}
-        type="button"
+      <PanelSection
+        action={<Pill>{state.materialIntervalSeconds}s</Pill>}
+        description="批量保存参考资料附件"
+        icon={<Download className="h-4 w-4" />}
+        title="参考资料"
       >
-        {state.isMaterialDownloading ? '下载中...' : '批量下载参考资料'}
-      </button>
-      <StatusMessage status={state.materialDownloadStatus} />
+        <FieldRow label="下载间隔">
+          <Input
+            className="w-20 text-center"
+            id="material-download-interval"
+            max={60}
+            min={5}
+            onChange={(event) => state.setMaterialIntervalSeconds(Number(event.currentTarget.value))}
+            type="number"
+            value={state.materialIntervalSeconds}
+          />
+        </FieldRow>
+        <Button
+          disabled={state.isMaterialDownloading}
+          onClick={() => void state.startMaterialDownload()}
+          variant="secondary"
+        >
+          <Download className="h-4 w-4" />
+          {state.isMaterialDownloading ? '下载中...' : '批量下载参考资料'}
+        </Button>
+        <StatusMessage status={state.materialDownloadStatus} />
+      </PanelSection>
 
-      <hr className="ouchn-divider" />
-
-      <div className="ouchn-input-row">
-        <label className="ouchn-label" htmlFor="auto-hang-interval">
-          挂机间隔(秒)
-        </label>
-        <input
-          className="ouchn-input ouchn-input-sm"
-          id="auto-hang-interval"
-          max={300}
-          min={10}
-          onChange={(event) => state.setHangIntervalSeconds(Number(event.currentTarget.value))}
-          type="number"
-          value={state.hangIntervalSeconds || DEFAULT_HANG_INTERVAL}
-        />
-      </div>
-      <button
-        className={`ouchn-btn ${state.isAutoHanging ? 'ouchn-btn-warning' : 'ouchn-btn-success'}`}
-        onClick={() => void state.startAutoHang()}
-        type="button"
+      <PanelSection
+        action={
+          <Pill className={state.isAutoHanging ? 'border-amber-200 bg-amber-50 text-amber-900' : undefined}>
+            {state.isAutoHanging ? '运行中' : `${state.hangIntervalSeconds || DEFAULT_HANG_INTERVAL}s`}
+          </Pill>
+        }
+        description="按设定间隔标记视频学习进度"
+        icon={<TimerReset className="h-4 w-4" />}
+        title="视频挂机"
       >
-        {state.isAutoHanging ? '停止挂机' : '一键全部挂机'}
-      </button>
-      <StatusMessage status={state.autoHangStatus} />
+        <FieldRow label="挂机间隔">
+          <Input
+            className="w-20 text-center"
+            id="auto-hang-interval"
+            max={300}
+            min={10}
+            onChange={(event) => state.setHangIntervalSeconds(Number(event.currentTarget.value))}
+            type="number"
+            value={state.hangIntervalSeconds || DEFAULT_HANG_INTERVAL}
+          />
+        </FieldRow>
+        <Button onClick={() => void state.startAutoHang()} variant={state.isAutoHanging ? 'warning' : 'success'}>
+          {state.isAutoHanging ? <Square className="h-4 w-4" /> : <PlayCircle className="h-4 w-4" />}
+          {state.isAutoHanging ? '停止挂机' : '一键全部挂机'}
+        </Button>
+        <StatusMessage status={state.autoHangStatus} />
+      </PanelSection>
     </PanelShell>
   );
 }

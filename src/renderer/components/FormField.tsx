@@ -1,4 +1,5 @@
 import type { ChangeEvent } from 'react';
+import { Input, Label, Textarea } from './ui';
 
 interface FormFieldProps {
   id: string;
@@ -30,22 +31,13 @@ export function FormField({
   };
 
   return (
-    <div className="ouchn-field">
-      <label className="ouchn-label" htmlFor={id}>
-        {label}
-      </label>
+    <div className="space-y-1">
+      <Label htmlFor={id}>{label}</Label>
       {textarea ? (
-        <textarea
-          className="ouchn-textarea"
-          id={id}
-          onChange={handleChange}
-          placeholder={placeholder}
-          rows={rows}
-          value={value}
-        />
+        <Textarea id={id} onChange={handleChange} placeholder={placeholder} rows={rows} value={value} />
       ) : (
-        <input
-          className={type === 'number' ? 'ouchn-input ouchn-input-sm' : 'ouchn-input'}
+        <Input
+          className={type === 'number' ? 'w-20 text-center' : undefined}
           id={id}
           max={max}
           min={min}

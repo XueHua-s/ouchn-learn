@@ -1,360 +1,268 @@
 /**
  * 全局样式注入
  *
- * 设计方向：Industrial-Tech — 深色面板、高对比强调色、精确的间距与交互态
- * 避免：紫色渐变+白底、Arial/Inter 等泛用字体
+ * UI 方向：shadcn-style light workbench。
+ * 说明：Userscript 产物是单文件 IIFE，不能依赖页面外部 CSS 资产；这里注入一组
+ * scoped Tailwind utilities，React 组件用 Tailwind className 渲染，避免污染 OUCHN 页面。
  */
 export function injectStyles(): void {
+  const existing = document.getElementById('ouchn-tailwind-runtime-style');
+  if (existing) return;
+
   const style = document.createElement('style');
+  style.id = 'ouchn-tailwind-runtime-style';
   style.textContent = `
-    /* ========== 主题变量 ========== */
-    .ouchn-panel {
-      --panel-bg: #1a1d23;
-      --panel-surface: #22262e;
-      --panel-border: #2e333d;
-      --panel-radius: 8px;
-
-      --text-primary: #e8eaed;
-      --text-secondary: #9aa0a8;
-      --text-muted: #6b737e;
-
-      --accent: #00d4aa;
-      --accent-hover: #00f0c0;
-      --accent-glow: rgba(0, 212, 170, 0.25);
-
-      --warn: #f0a030;
-      --warn-glow: rgba(240, 160, 48, 0.2);
-
-      --danger: #f05050;
-      --danger-bg: rgba(240, 80, 80, 0.12);
-
-      --success-bg: rgba(0, 212, 170, 0.1);
-      --info-bg: rgba(96, 165, 250, 0.1);
-      --info-text: #60a5fa;
-
-      --font-body: 'PingFang SC', 'Noto Sans SC', 'Source Han Sans CN', system-ui, sans-serif;
-      --font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
-
-      --shadow-panel: 0 8px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--panel-border);
-      --shadow-btn: 0 2px 8px rgba(0, 0, 0, 0.3);
-
-      --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
-      --transition-normal: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    #ouchn-react-renderer-root {
+      position: relative;
+      z-index: 999998;
+      color-scheme: light;
+      font-family: ui-sans-serif, 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', system-ui, sans-serif;
     }
 
-    /* ========== 面板容器 ========== */
+    #ouchn-react-renderer-root *,
+    #ouchn-react-renderer-root *::before,
+    #ouchn-react-renderer-root *::after {
+      box-sizing: border-box;
+    }
+
     .ouchn-panel {
       position: fixed;
       top: 80px;
       right: 20px;
-      width: 320px;
+      width: 360px;
       max-width: calc(100vw - 24px);
-      background: var(--panel-bg);
-      border-radius: var(--panel-radius);
-      box-shadow: var(--shadow-panel);
       z-index: 999998;
-      font-family: var(--font-body);
-      font-size: 13px;
-      color: var(--text-primary);
       opacity: 0;
-      transform: translateY(-12px) scale(0.98);
-      animation: ouchn-panel-in 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      transform: translateY(-10px) scale(0.985);
+      animation: ouchn-panel-in 0.26s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      font-size: 14px;
+      line-height: 1.4;
     }
 
-    #ouchn-react-renderer-root {
-      position: relative;
-      z-index: 999998;
+    @media (max-width: 480px) {
+      .ouchn-panel {
+        right: 12px;
+        width: calc(100vw - 24px);
+      }
     }
 
     @keyframes ouchn-panel-in {
       to { opacity: 1; transform: translateY(0) scale(1); }
     }
 
-    /* ========== 面板头部 ========== */
-    .ouchn-panel-header {
-      background: var(--panel-surface);
-      padding: 10px 14px;
-      cursor: move;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      border-radius: var(--panel-radius) var(--panel-radius) 0 0;
-      border-bottom: 1px solid var(--panel-border);
-      user-select: none;
-    }
-
-    .ouchn-panel-title {
-      color: var(--text-primary);
-      font-size: 14px;
-      font-weight: 600;
-      margin: 0;
-      letter-spacing: 0;
-    }
-
-    .ouchn-panel-toggle {
-      background: none;
-      border: 1px solid var(--panel-border);
-      color: var(--text-secondary);
-      font-size: 14px;
-      cursor: pointer;
-      padding: 0;
-      width: 22px;
-      height: 22px;
-      border-radius: 4px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: all var(--transition-fast);
-      line-height: 1;
-    }
-
-    .ouchn-panel-toggle:hover {
-      background: var(--panel-border);
-      color: var(--text-primary);
-    }
-
-    /* ========== 面板主体 ========== */
     .ouchn-panel-body {
-      padding: 14px;
-      background: var(--panel-bg);
-      max-height: 520px;
+      max-height: min(620px, calc(100vh - 120px));
       overflow-y: auto;
-      border-radius: 0 0 var(--panel-radius) var(--panel-radius);
-      transition: max-height var(--transition-normal), padding var(--transition-normal), opacity var(--transition-normal);
+      transition: max-height 160ms ease, padding 160ms ease, opacity 160ms ease;
     }
 
     .ouchn-panel-body.collapsed {
       max-height: 0;
-      padding-top: 0;
-      padding-bottom: 0;
+      padding-top: 0 !important;
+      padding-bottom: 0 !important;
       opacity: 0;
       overflow: hidden;
     }
 
-    .ouchn-panel-body::-webkit-scrollbar {
-      width: 4px;
-    }
-
-    .ouchn-panel-body::-webkit-scrollbar-track {
-      background: transparent;
-    }
-
+    .ouchn-panel-body::-webkit-scrollbar { width: 8px; }
+    .ouchn-panel-body::-webkit-scrollbar-track { background: transparent; }
     .ouchn-panel-body::-webkit-scrollbar-thumb {
-      background: var(--panel-border);
-      border-radius: 2px;
+      background: #cbd5e1;
+      border: 2px solid transparent;
+      border-radius: 9999px;
+      background-clip: content-box;
     }
 
-    /* ========== 按钮系统 ========== */
-    .ouchn-btn {
-      width: 100%;
-      padding: 9px 12px;
-      margin: 5px 0;
-      border: none;
-      border-radius: 6px;
-      font-size: 13px;
-      font-weight: 600;
-      font-family: var(--font-body);
-      cursor: pointer;
-      transition: all var(--transition-fast);
-      position: relative;
-      letter-spacing: 0;
+    #ouchn-react-renderer-root .flex { display: flex; }
+    #ouchn-react-renderer-root .inline-flex { display: inline-flex; }
+    #ouchn-react-renderer-root .grid { display: grid; }
+    #ouchn-react-renderer-root .grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    #ouchn-react-renderer-root .items-start { align-items: flex-start; }
+    #ouchn-react-renderer-root .items-center { align-items: center; }
+    #ouchn-react-renderer-root .justify-center { justify-content: center; }
+    #ouchn-react-renderer-root .justify-between { justify-content: space-between; }
+    #ouchn-react-renderer-root .gap-1 { gap: 0.25rem; }
+    #ouchn-react-renderer-root .gap-2 { gap: 0.5rem; }
+    #ouchn-react-renderer-root .gap-3 { gap: 0.75rem; }
+    #ouchn-react-renderer-root .space-y-1 > :not([hidden]) ~ :not([hidden]) { margin-top: 0.25rem; }
+    #ouchn-react-renderer-root .space-y-2 > :not([hidden]) ~ :not([hidden]) { margin-top: 0.5rem; }
+    #ouchn-react-renderer-root .space-y-3 > :not([hidden]) ~ :not([hidden]) { margin-top: 0.75rem; }
+
+    #ouchn-react-renderer-root .m-0 { margin: 0; }
+    #ouchn-react-renderer-root .mb-3 { margin-bottom: 0.75rem; }
+    #ouchn-react-renderer-root .ml-auto { margin-left: auto; }
+    #ouchn-react-renderer-root .mt-0\\.5 { margin-top: 0.125rem; }
+    #ouchn-react-renderer-root .p-0 { padding: 0; }
+    #ouchn-react-renderer-root .p-1 { padding: 0.25rem; }
+    #ouchn-react-renderer-root .p-3 { padding: 0.75rem; }
+    #ouchn-react-renderer-root .p-4 { padding: 1rem; }
+    #ouchn-react-renderer-root .px-2 { padding-left: 0.5rem; padding-right: 0.5rem; }
+    #ouchn-react-renderer-root .px-3 { padding-left: 0.75rem; padding-right: 0.75rem; }
+    #ouchn-react-renderer-root .px-4 { padding-left: 1rem; padding-right: 1rem; }
+    #ouchn-react-renderer-root .py-0\\.5 { padding-top: 0.125rem; padding-bottom: 0.125rem; }
+    #ouchn-react-renderer-root .py-1 { padding-top: 0.25rem; padding-bottom: 0.25rem; }
+    #ouchn-react-renderer-root .py-2 { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+    #ouchn-react-renderer-root .py-3 { padding-top: 0.75rem; padding-bottom: 0.75rem; }
+
+    #ouchn-react-renderer-root .h-4 { height: 1rem; }
+    #ouchn-react-renderer-root .h-8 { height: 2rem; }
+    #ouchn-react-renderer-root .h-9 { height: 2.25rem; }
+    #ouchn-react-renderer-root .h-10 { height: 2.5rem; }
+    #ouchn-react-renderer-root .min-h-16 { min-height: 4rem; }
+    #ouchn-react-renderer-root .w-4 { width: 1rem; }
+    #ouchn-react-renderer-root .w-8 { width: 2rem; }
+    #ouchn-react-renderer-root .w-9 { width: 2.25rem; }
+    #ouchn-react-renderer-root .w-20 { width: 5rem; }
+    #ouchn-react-renderer-root .w-full { width: 100%; }
+    #ouchn-react-renderer-root .min-w-0 { min-width: 0; }
+    #ouchn-react-renderer-root .shrink-0 { flex-shrink: 0; }
+
+    #ouchn-react-renderer-root .cursor-move { cursor: move; }
+    #ouchn-react-renderer-root .cursor-pointer { cursor: pointer; }
+    #ouchn-react-renderer-root .select-none { user-select: none; }
+    #ouchn-react-renderer-root .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #ouchn-react-renderer-root .rounded-md { border-radius: 0.375rem; }
+    #ouchn-react-renderer-root .rounded-lg { border-radius: 0.5rem; }
+    #ouchn-react-renderer-root .rounded-xl { border-radius: 0.75rem; }
+    #ouchn-react-renderer-root .rounded-full { border-radius: 9999px; }
+    #ouchn-react-renderer-root .rounded-t-xl { border-top-left-radius: 0.75rem; border-top-right-radius: 0.75rem; }
+    #ouchn-react-renderer-root .border { border-width: 1px; border-style: solid; }
+    #ouchn-react-renderer-root .border-b { border-bottom-width: 1px; border-bottom-style: solid; }
+    #ouchn-react-renderer-root .border-transparent { border-color: transparent; }
+    #ouchn-react-renderer-root .border-slate-200 { border-color: #e2e8f0; }
+    #ouchn-react-renderer-root .border-slate-300 { border-color: #cbd5e1; }
+    #ouchn-react-renderer-root .border-teal-200 { border-color: #99f6e4; }
+    #ouchn-react-renderer-root .border-sky-200 { border-color: #bae6fd; }
+    #ouchn-react-renderer-root .border-emerald-200 { border-color: #a7f3d0; }
+    #ouchn-react-renderer-root .border-amber-200 { border-color: #fde68a; }
+    #ouchn-react-renderer-root .border-rose-200 { border-color: #fecdd3; }
+
+    #ouchn-react-renderer-root .bg-transparent { background-color: transparent; }
+    #ouchn-react-renderer-root .bg-white { background-color: #ffffff; }
+    #ouchn-react-renderer-root .bg-slate-50 { background-color: #f8fafc; }
+    #ouchn-react-renderer-root .bg-slate-100 { background-color: #f1f5f9; }
+    #ouchn-react-renderer-root .bg-teal-50 { background-color: #f0fdfa; }
+    #ouchn-react-renderer-root .bg-teal-700 { background-color: #0f766e; }
+    #ouchn-react-renderer-root .bg-emerald-50 { background-color: #ecfdf5; }
+    #ouchn-react-renderer-root .bg-emerald-600 { background-color: #059669; }
+    #ouchn-react-renderer-root .bg-amber-50 { background-color: #fffbeb; }
+    #ouchn-react-renderer-root .bg-amber-500 { background-color: #f59e0b; }
+    #ouchn-react-renderer-root .bg-rose-50 { background-color: #fff1f2; }
+    #ouchn-react-renderer-root .bg-rose-600 { background-color: #e11d48; }
+    #ouchn-react-renderer-root .bg-sky-50 { background-color: #f0f9ff; }
+
+    #ouchn-react-renderer-root .text-center { text-align: center; }
+    #ouchn-react-renderer-root .text-xs { font-size: 0.75rem; line-height: 1rem; }
+    #ouchn-react-renderer-root .text-sm { font-size: 0.875rem; line-height: 1.25rem; }
+    #ouchn-react-renderer-root .font-medium { font-weight: 500; }
+    #ouchn-react-renderer-root .font-semibold { font-weight: 600; }
+    #ouchn-react-renderer-root .font-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    #ouchn-react-renderer-root .text-white { color: #ffffff; }
+    #ouchn-react-renderer-root .text-slate-950 { color: #020617; }
+    #ouchn-react-renderer-root .text-slate-900 { color: #0f172a; }
+    #ouchn-react-renderer-root .text-slate-700 { color: #334155; }
+    #ouchn-react-renderer-root .text-slate-600 { color: #475569; }
+    #ouchn-react-renderer-root .text-slate-500 { color: #64748b; }
+    #ouchn-react-renderer-root .text-slate-400 { color: #94a3b8; }
+    #ouchn-react-renderer-root .text-teal-700 { color: #0f766e; }
+    #ouchn-react-renderer-root .text-sky-800 { color: #075985; }
+    #ouchn-react-renderer-root .text-emerald-800 { color: #065f46; }
+    #ouchn-react-renderer-root .text-amber-900 { color: #78350f; }
+    #ouchn-react-renderer-root .text-rose-800 { color: #9f1239; }
+
+    #ouchn-react-renderer-root .shadow-sm { box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08); }
+    #ouchn-react-renderer-root .shadow-2xl {
+      box-shadow: 0 24px 70px rgba(15, 23, 42, 0.22), 0 0 0 1px rgba(15, 23, 42, 0.04);
+    }
+    #ouchn-react-renderer-root .transition-colors {
+      transition-property: color, background-color, border-color, text-decoration-color, fill, stroke;
+      transition-duration: 150ms;
+      transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
     }
 
-    .ouchn-btn:active {
-      transform: scale(0.98);
+    #ouchn-react-renderer-root .placeholder\\:text-slate-400::placeholder { color: #94a3b8; }
+    #ouchn-react-renderer-root .hover\\:bg-slate-50:hover { background-color: #f8fafc; }
+    #ouchn-react-renderer-root .hover\\:bg-slate-100:hover { background-color: #f1f5f9; }
+    #ouchn-react-renderer-root .hover\\:bg-white:hover { background-color: #ffffff; }
+    #ouchn-react-renderer-root .hover\\:bg-teal-800:hover { background-color: #115e59; }
+    #ouchn-react-renderer-root .hover\\:bg-emerald-700:hover { background-color: #047857; }
+    #ouchn-react-renderer-root .hover\\:bg-amber-600:hover { background-color: #d97706; }
+    #ouchn-react-renderer-root .hover\\:bg-rose-700:hover { background-color: #be123c; }
+    #ouchn-react-renderer-root .hover\\:text-slate-950:hover { color: #020617; }
+    #ouchn-react-renderer-root .focus-visible\\:outline-none:focus-visible { outline: 2px solid transparent; outline-offset: 2px; }
+    #ouchn-react-renderer-root .focus-visible\\:ring-2:focus-visible {
+      box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px #0f766e;
+    }
+    #ouchn-react-renderer-root .focus-visible\\:ring-teal-700:focus-visible {
+      --ouchn-ring-color: #0f766e;
+    }
+    #ouchn-react-renderer-root .disabled\\:cursor-not-allowed:disabled { cursor: not-allowed; }
+    #ouchn-react-renderer-root .disabled\\:opacity-50:disabled { opacity: 0.5; }
+
+    #ouchn-react-renderer-root button,
+    #ouchn-react-renderer-root input,
+    #ouchn-react-renderer-root textarea {
+      font: inherit;
     }
 
-    .ouchn-btn:disabled {
-      opacity: 0.45;
-      cursor: not-allowed;
-      transform: none !important;
-      box-shadow: none !important;
-    }
-
-    .ouchn-btn-primary {
-      background: var(--accent);
-      color: #0a0f14;
-      box-shadow: var(--shadow-btn);
-    }
-
-    .ouchn-btn-primary:hover:not(:disabled) {
-      background: var(--accent-hover);
-      box-shadow: 0 4px 16px var(--accent-glow);
-    }
-
-    .ouchn-btn-secondary {
-      background: var(--panel-surface);
-      color: var(--text-primary);
-      border: 1px solid var(--panel-border);
-    }
-
-    .ouchn-btn-secondary:hover:not(:disabled) {
-      background: var(--panel-border);
-      border-color: var(--text-muted);
-    }
-
-    .ouchn-btn-success {
-      background: linear-gradient(135deg, #059669, #10b981);
-      color: #fff;
-      box-shadow: var(--shadow-btn);
-    }
-
-    .ouchn-btn-success:hover:not(:disabled) {
-      box-shadow: 0 4px 16px rgba(16, 185, 129, 0.35);
-    }
-
-    .ouchn-btn-warning {
-      background: var(--warn);
-      color: #1a1d23;
-      box-shadow: var(--shadow-btn);
-    }
-
-    .ouchn-btn-warning:hover:not(:disabled) {
-      box-shadow: 0 4px 16px var(--warn-glow);
-    }
-
-    /* ========== 状态提示 ========== */
-    .ouchn-status {
-      padding: 8px 10px;
-      margin: 6px 0;
-      border-radius: 6px;
-      font-size: 12px;
-      text-align: center;
-      border: 1px solid transparent;
-      transition: all var(--transition-fast);
-    }
-
-    .ouchn-status-progress {
-      display: inline-block;
-      margin-left: 6px;
-      font-family: var(--font-mono);
-      color: currentColor;
-      opacity: 0.85;
-    }
-
-    .ouchn-status-info {
-      background: var(--info-bg);
-      color: var(--info-text);
-      border-color: rgba(96, 165, 250, 0.2);
-    }
-
-    .ouchn-status-success {
-      background: var(--success-bg);
-      color: var(--accent);
-      border-color: rgba(0, 212, 170, 0.2);
-    }
-
-    .ouchn-status-warning {
-      background: var(--danger-bg);
-      color: var(--danger);
-      border-color: rgba(240, 80, 80, 0.2);
-    }
-
-    /* ========== 表单控件 ========== */
-    .ouchn-input,
-    .ouchn-textarea {
-      width: 100%;
-      padding: 8px 10px;
-      background: var(--panel-surface);
-      border: 1px solid var(--panel-border);
-      border-radius: 6px;
-      color: var(--text-primary);
-      font-family: var(--font-body);
-      font-size: 13px;
-      box-sizing: border-box;
-      transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+    #ouchn-react-renderer-root input,
+    #ouchn-react-renderer-root textarea {
       outline: none;
     }
 
-    .ouchn-input:focus,
-    .ouchn-textarea:focus {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 2px var(--accent-glow);
-    }
-
-    .ouchn-input::placeholder,
-    .ouchn-textarea::placeholder {
-      color: var(--text-muted);
-    }
-
-    .ouchn-textarea {
+    #ouchn-react-renderer-root textarea {
       resize: vertical;
-      min-height: 56px;
     }
 
-    .ouchn-label {
-      font-size: 11px;
-      color: var(--text-secondary);
-      display: block;
-      margin-bottom: 4px;
-      font-weight: 500;
-      text-transform: uppercase;
-      letter-spacing: 0;
-    }
-
-    .ouchn-field {
-      margin-bottom: 10px;
-    }
-
-    .ouchn-input-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin: 8px 0;
-    }
-
-    .ouchn-input-row .ouchn-label {
-      margin-bottom: 0;
-    }
-
-    .ouchn-input-sm {
-      width: 80px;
-      padding: 5px 8px;
-      text-align: center;
-      font-family: var(--font-mono);
-      font-size: 13px;
-    }
-
-    /* ========== Tab 切换 ========== */
-    .ouchn-tabs {
-      display: flex;
-      gap: 2px;
-      margin-bottom: 12px;
-      background: var(--panel-surface);
-      border-radius: 6px;
-      padding: 2px;
-    }
-
-    .ouchn-tab {
-      flex: 1;
-      padding: 7px 8px;
-      border: none;
-      background: transparent;
-      color: var(--text-muted);
-      border-radius: 4px;
-      cursor: pointer;
+    .ouchn-btn {
+      width: 100%;
+      border-radius: 0.375rem;
+      border: 1px solid #cbd5e1;
+      padding: 0.5rem 0.75rem;
       font-weight: 600;
-      font-size: 12px;
-      font-family: var(--font-body);
-      transition: all var(--transition-fast);
-      letter-spacing: 0;
+      cursor: pointer;
     }
 
-    .ouchn-tab:hover {
-      color: var(--text-secondary);
-      background: rgba(255, 255, 255, 0.04);
+    .ouchn-btn-primary,
+    .ouchn-btn-success {
+      background: #0f766e;
+      color: #ffffff;
     }
 
-    .ouchn-tab.active {
-      background: var(--accent);
-      color: #0a0f14;
+    .ouchn-btn-secondary {
+      background: #ffffff;
+      color: #334155;
     }
 
-    /* ========== 分隔线 ========== */
-    .ouchn-divider {
-      margin: 12px 0;
-      border: none;
-      border-top: 1px solid var(--panel-border);
+    .ouchn-btn-warning {
+      background: #f59e0b;
+      color: #020617;
+    }
+
+    .ouchn-status {
+      border-radius: 0.375rem;
+      border: 1px solid #e2e8f0;
+      padding: 0.5rem 0.75rem;
+      font-size: 0.75rem;
+      font-weight: 500;
+    }
+
+    .ouchn-status-info {
+      border-color: #bae6fd;
+      background: #f0f9ff;
+      color: #075985;
+    }
+
+    .ouchn-status-success {
+      border-color: #a7f3d0;
+      background: #ecfdf5;
+      color: #065f46;
+    }
+
+    .ouchn-status-warning {
+      border-color: #fde68a;
+      background: #fffbeb;
+      color: #78350f;
     }
   `;
   document.head.appendChild(style);
