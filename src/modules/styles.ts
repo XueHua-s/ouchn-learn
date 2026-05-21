@@ -214,6 +214,121 @@ export function injectStyles(): void {
       resize: vertical;
     }
 
+    #ouchn-react-renderer-root button {
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    #ouchn-react-renderer-root button:not(:disabled) {
+      transition-property: color, background-color, border-color, box-shadow, transform;
+      transition-duration: 150ms;
+      transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    #ouchn-react-renderer-root button:not(:disabled):active {
+      transform: translateY(1px);
+    }
+
+    #ouchn-react-renderer-root .ouchn-provider-tabs {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.375rem;
+      border: 1px solid #cbd5e1;
+      border-radius: 0.5rem;
+      background: #e2e8f0;
+      padding: 0.25rem;
+      box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.08);
+    }
+
+    #ouchn-react-renderer-root .ouchn-provider-tab {
+      position: relative;
+      display: inline-flex;
+      height: 2.375rem;
+      min-width: 0;
+      align-items: center;
+      justify-content: center;
+      gap: 0.375rem;
+      border: 1px solid transparent;
+      border-radius: 0.375rem;
+      background: transparent;
+      color: #475569;
+      cursor: pointer;
+      font-size: 0.75rem;
+      font-weight: 700;
+      line-height: 1rem;
+      outline: none;
+    }
+
+    #ouchn-react-renderer-root .ouchn-provider-tab::before {
+      content: '';
+      width: 0.375rem;
+      height: 0.375rem;
+      border-radius: 9999px;
+      background: #94a3b8;
+      box-shadow: 0 0 0 0 rgba(15, 118, 110, 0);
+      transition: background-color 150ms cubic-bezier(0.4, 0, 0.2, 1),
+        box-shadow 150ms cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    #ouchn-react-renderer-root .ouchn-provider-tab:hover {
+      border-color: #cbd5e1;
+      background: #f8fafc;
+      color: #0f172a;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+    }
+
+    #ouchn-react-renderer-root .ouchn-provider-tab[aria-selected='true'] {
+      border-color: #0f766e;
+      background: #0f766e;
+      color: #ffffff;
+      box-shadow: 0 6px 14px rgba(15, 118, 110, 0.26);
+    }
+
+    #ouchn-react-renderer-root .ouchn-provider-tab[aria-selected='true']::before {
+      background: #ffffff;
+      box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.22);
+    }
+
+    #ouchn-react-renderer-root .ouchn-provider-tab[aria-selected='true']:hover {
+      background: #115e59;
+      border-color: #115e59;
+      color: #ffffff;
+    }
+
+    #ouchn-react-renderer-root .ouchn-provider-tab:focus-visible {
+      box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px #0f766e;
+    }
+
+    #ouchn-react-renderer-root .ouchn-provider-tab[aria-selected='true']:focus-visible {
+      box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px #0f766e, 0 6px 14px rgba(15, 118, 110, 0.26);
+    }
+
+    #ouchn-react-renderer-root .ouchn-status-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.5rem;
+    }
+
+    #ouchn-react-renderer-root .ouchn-status-text {
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+
+    #ouchn-react-renderer-root .ouchn-progress-track {
+      height: 0.25rem;
+      margin-top: 0.5rem;
+      overflow: hidden;
+      border-radius: 9999px;
+      background: rgba(255, 255, 255, 0.7);
+    }
+
+    #ouchn-react-renderer-root .ouchn-progress-fill {
+      height: 100%;
+      border-radius: inherit;
+      background: currentColor;
+      opacity: 0.72;
+      transition: width 180ms ease;
+    }
+
     .ouchn-btn {
       width: 100%;
       border-radius: 0.375rem;

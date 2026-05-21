@@ -32,7 +32,6 @@ export interface CourseAutomationService {
 
 export interface ExamRunnerCallbacks extends TaskCallbacks {
   onStats?(stats: ExamStats): void;
-  onAiProgress?(done: number, total: number): void;
 }
 
 export interface ExamRunnerService {

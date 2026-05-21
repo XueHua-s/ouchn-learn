@@ -15,7 +15,6 @@ type ProviderConfig = ExamConfig['providers'][Provider];
 type ProviderField = keyof ProviderConfig;
 
 interface ExamStore {
-  aiProgress: { done: number; total: number } | null;
   config: ExamConfig;
   isRunning: boolean;
   stats: ExamStats | null;
@@ -68,7 +67,6 @@ function mirrorActiveProvider(config: ExamConfig, provider = config.provider): E
 }
 
 export const useExamStore = create<ExamStore>((set, get) => ({
-  aiProgress: null,
   config: getExamConfig(),
   isRunning: false,
   stats: null,
@@ -85,7 +83,6 @@ export const useExamStore = create<ExamStore>((set, get) => ({
 
     const saved = saveExamConfig(config);
     set({
-      aiProgress: null,
       config,
       stats: null,
       status: saved ? null : { message: '配置保存失败，将仅用于本次答题', type: 'warning' },
@@ -94,7 +91,6 @@ export const useExamStore = create<ExamStore>((set, get) => ({
     await examRunnerService.runAutoExam(config, {
       onStatus: (status) => set({ status }),
       onRunningChange: (isRunning) => set({ isRunning }),
-      onAiProgress: (done, total) => set({ aiProgress: { done, total } }),
       onStats: (stats) => set({ stats }),
     });
   },

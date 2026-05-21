@@ -1,6 +1,6 @@
 import type { ExamConfig, ExamStats, Question } from '@/types/exam';
 import { log, warn, error } from '@/types/exam';
-import type { ExamRunnerCallbacks, ExamRunnerService, TaskStatusType } from './task-contracts';
+import type { ExamRunnerCallbacks, ExamRunnerService, TaskProgress, TaskStatusType } from './task-contracts';
 import { waitForQuestionsStable, extractQuestions } from '@/modules/exam/question-extract';
 import { callProvider } from '@/modules/exam/ai-provider';
 import { fillAnswersWithTools } from '@/modules/exam/tool-executor';
@@ -72,8 +72,13 @@ function printExamStats(stats: ExamStats, questions: Question[]): void {
   }
 }
 
-function emitStatus(callbacks: ExamRunnerCallbacks, message: string, type: TaskStatusType = 'info'): void {
-  callbacks.onStatus({ message, type });
+function emitStatus(
+  callbacks: ExamRunnerCallbacks,
+  message: string,
+  type: TaskStatusType = 'info',
+  progress?: TaskProgress,
+): void {
+  callbacks.onStatus(progress ? { message, type, progress } : { message, type });
 }
 
 export function validateExamConfig(config: ExamConfig): boolean {
@@ -111,8 +116,7 @@ export async function runAutoExam(config: ExamConfig, callbacks: ExamRunnerCallb
     emitStatus(callbacks, `已提取 ${questions.length} 道题目，正在调用 AI 分析...`, 'info');
 
     const aiResponse = await callProvider(config, questions, stats, (done, total) => {
-      callbacks.onAiProgress?.(done, total);
-      emitStatus(callbacks, `AI 答题中... ${done}/${total}`, 'info');
+      emitStatus(callbacks, 'AI 答题中...', 'info', { done, total });
     });
     stats.aiReturnedCount = aiResponse.questions?.length || 0;
 

@@ -10,6 +10,11 @@ export function StatusMessage({ status }: StatusMessageProps) {
   if (!status) return null;
 
   const iconClassName = 'h-4 w-4 shrink-0';
+  const hasProgress = Boolean(status.progress && status.progress.total > 0);
+  const progressPercent =
+    hasProgress && status.progress
+      ? Math.min(100, Math.max(0, Math.round((status.progress.done / status.progress.total) * 100)))
+      : 0;
   const statusConfig = {
     error: {
       className: 'border-rose-200 bg-rose-50 text-rose-800',
@@ -30,15 +35,20 @@ export function StatusMessage({ status }: StatusMessageProps) {
   }[status.type];
 
   return (
-    <div
-      className={cn('flex items-start gap-2 rounded-md border px-3 py-2 text-xs font-medium', statusConfig.className)}
-    >
-      {statusConfig.icon}
-      <span>{status.message}</span>
-      {status.progress ? (
-        <span className="ml-auto shrink-0 font-mono">
-          {status.progress.done}/{status.progress.total}
-        </span>
+    <div className={cn('ouchn-status-message rounded-md border px-3 py-2 text-xs font-medium', statusConfig.className)}>
+      <div className="ouchn-status-row">
+        {statusConfig.icon}
+        <span className="ouchn-status-text">{status.message}</span>
+        {hasProgress && status.progress ? (
+          <span className="ml-auto shrink-0 font-mono">
+            {status.progress.done}/{status.progress.total}
+          </span>
+        ) : null}
+      </div>
+      {hasProgress ? (
+        <div className="ouchn-progress-track" aria-hidden="true">
+          <div className="ouchn-progress-fill" style={{ width: `${progressPercent}%` }} />
+        </div>
       ) : null}
     </div>
   );

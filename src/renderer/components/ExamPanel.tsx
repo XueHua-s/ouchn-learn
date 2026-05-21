@@ -1,4 +1,4 @@
-import { Bot, Gauge, KeyRound, PlayCircle, Save, ServerCog } from 'lucide-react';
+import { Bot, KeyRound, PlayCircle, Save, ServerCog } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import { useExamStore } from '@/store/exam-store';
 import {
@@ -16,7 +16,6 @@ import { Button, FieldRow, Input, PanelSection, Pill } from './ui';
 export function ExamPanel() {
   const state = useExamStore(
     useShallow((store) => ({
-      aiProgress: store.aiProgress,
       config: store.config,
       isRunning: store.isRunning,
       runExam: store.runExam,
@@ -109,12 +108,6 @@ export function ExamPanel() {
       </div>
 
       <StatusMessage status={state.status} />
-      {state.aiProgress ? (
-        <div className="flex items-center gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-medium text-sky-800">
-          <Gauge className="h-4 w-4" />
-          AI 进度 {state.aiProgress.done}/{state.aiProgress.total}
-        </div>
-      ) : null}
       {state.stats ? (
         <div className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800">
           <KeyRound className="h-4 w-4" />
