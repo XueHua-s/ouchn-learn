@@ -1,7 +1,3 @@
 {
-  "*.ts": [
-    "prettier --write",
-    "eslint --fix",
-    "bash -c 'tsc --noEmit'"
-  ]
+  "*.{ts,tsx}": ["prettier --write", "eslint --fix --max-warnings=0", "bash -c 'tsc --noEmit'"]
 }

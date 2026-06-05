@@ -1,60 +1,77 @@
 # ouchn-learn
 
-`ouchn-learn` 是一个面向国家开放大学 (OUCHN) 平台的 Tampermonkey 用户脚本，用于课程页自动查看、视频挂机、参考资料下载、全屏资源保存，以及考试页 AI 自动答题。
+`ouchn-learn` 是一个面向国家开放大学 (OUCHN) 学习平台的 Tampermonkey 用户脚本。它把课程页自动查看、视频挂机、参考资料下载、全屏学习资源保存，以及考试页 AI 自动答题整合在一个浏览器脚本中。
 
-当前版本已经完成大规模重构：旧的 jQuery 字符串面板被 React 19 渲染器替换，界面状态统一交给 Zustand 管理，课程自动化与 AI 答题流程通过 service 适配层连接到业务模块。AI 自动答题也从“UI 直接编排 DOM 写入”收敛为“题目提取 -> Provider 调用 -> 本地受控工具执行 -> 统计反馈”的链路，更便于维护和诊断。
+当前代码已经从旧版 jQuery 字符串面板迁移到 React 19 渲染器：界面由 React 组件负责，状态由 Zustand 管理，课程自动化和考试自动答题通过 `src/services/*` 适配到浏览器 DOM 自动化模块。产物仍然是单文件 IIFE UserScript，运行在浏览器 + Tampermonkey 沙箱中。
 
-## 功能特性
+## 运行效果
 
-- **React 控制台**: 课程页、全屏学习页、考试页共用一套可拖动/折叠的 React 面板。
-- **自动查看页面**: 自动扫描未完成的“查看页面”任务，进入学习活动后再返回课程页继续处理。
-- **视频挂机**: 批量扫描挂机按钮，按设定间隔提交活动已读进度。
-- **参考资料下载**: 自动展开课程章节，收集参考资料附件并按间隔触发下载。
-- **保存学习资源**: 在全屏学习活动页展开资源树，批量保存视频和文档，文档可转换为 PDF。
-- **AI 自动答题**: 支持 OpenAI/Claude 兼容 Provider、独立 Provider 配置、逐题并发、图片题降级、工具化 DOM 回填和统计反馈。
-- **安全存储迁移**: AI API Key 优先保存到 Tampermonkey GM 存储，兼容旧版 localStorage 配置迁移。
+| 课程页控制台                                                                                            | AI 自动答题                                                                                    |
+| ------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| <img src="./docs/images/course-panel.png" alt="课程页资源下载、参考资料和视频挂机控制台" width="360" /> | <img src="./docs/images/exam-panel.png" alt="AI 自动答题模型配置和执行参数面板" width="360" /> |
 
-## 重构重点
+## 核心功能
 
-- **渲染层重构**: 删除旧的 jQuery 字符串拼接面板，改为 React 组件化渲染，减少 HTML 注入和状态同步问题。
-- **状态层重构**: 用 Zustand 拆分课程、考试、面板状态，避免 UI 事件和业务流程互相持有过多细节。
-- **服务适配层**: React UI 不直接调用复杂 DOM 逻辑，而是通过 `src/services/*` 转接到业务模块。
-- **AI 工具执行层**: AI 返回答案后先转换为本地受控工具调用，再由工具层校验题型、答案形态、DOM 定位和执行结果。
-- **样式隔离**: 面板样式集中在 `src/modules/styles.ts`，React runtime utilities 限定在 `#ouchn-react-renderer-root` 下，降低污染 OUCHN 页面样式的风险。
+- **课程页控制台**: 进入课程页后自动挂载可拖动、可折叠的 React 面板。
+- **一键查看页面**: 自动打开未完成的查看页面任务，完成后返回课程页继续扫描。
+- **视频挂机**: 批量查找视频学习活动，按配置间隔提交学习进度。
+- **参考资料下载**: 展开课程目录，收集附件资源并按间隔触发下载。
+- **全屏资源保存**: 在学习活动全屏页展开资源树，保存视频和文档资源，文档可转 PDF。
+- **AI 自动答题**: 支持 OpenAI/Claude 兼容接口、独立 Provider 配置、并发答题、图片题降级、工具化 DOM 回填和执行统计。
+- **配置迁移与安全存储**: AI API Key 优先写入 Tampermonkey GM 存储，兼容旧版 localStorage 配置迁移。
 
 ## 目标页面
 
-- `https://lms.ouchn.cn/course/**`: 课程自动查看、视频挂机、资源下载。
-- `https://lms.ouchn.cn/course/**/learning-activity/full-screen#/**`: 全屏学习资源保存。
-- `https://lms.ouchn.cn/exam/*/subjects*`: AI 自动答题。
+- `https://lms.ouchn.cn/course/**`: 课程页，支持自动查看、视频挂机、参考资料下载。
+- `https://lms.ouchn.cn/course/**/learning-activity/full-screen#/**`: 全屏学习活动页，支持批量保存学习资源。
+- `https://lms.ouchn.cn/exam/*/subjects*`: 考试答题页，支持 AI 自动答题。
 
-## 安装
+## 安装使用
 
 1. 安装 Tampermonkey。
-2. 获取发布版用户脚本，或本地执行 `pnpm run build` 后使用 `dist/index.global.js`。
-3. 在 Tampermonkey 中安装脚本后访问 OUCHN 课程页或考试页。
+2. 获取发布版用户脚本，或本地执行 `pnpm run build` 生成 `dist/index.global.js`。
+3. 在 Tampermonkey 中安装脚本。
+4. 访问 OUCHN 课程页、全屏学习活动页或考试页，脚本会根据 URL 自动切换面板模式。
 
-构建产物是带 UserScript header 的 IIFE 单文件脚本，运行在浏览器 + Tampermonkey 沙箱中。
+## 使用流程
 
-## 技术栈
+### 课程页
 
-- TypeScript (ES2020)
-- React 19 + React DOM
-- Zustand
-- jQuery (用于兼容 OUCHN 页面和既有 DOM 自动化)
-- tsup (IIFE/UserScript 构建)
-- jsPDF + html2canvas (文档资源 PDF 保存)
-- ESLint + Prettier + Husky + lint-staged
+课程页面板提供三类任务：
+
+1. **查看所有页面**: 扫描未完成查看任务，自动进入页面并返回课程页。
+2. **批量下载参考资料**: 按下载间隔展开章节并保存附件。
+3. **一键全部挂机**: 按挂机间隔标记视频学习进度。
+
+### 全屏学习活动页
+
+进入学习活动全屏页后，面板切换为保存资源模式：
+
+1. 点击保存所有学习资源。
+2. 脚本展开左侧资源树并逐项处理。
+3. 视频资源走文件保存，文档资源通过 `jsPDF` + `html2canvas` 转为 PDF。
+
+### 考试页
+
+考试页面板提供 OpenAI 和 Claude 两套独立配置：
+
+1. 选择 Provider。
+2. 填写模型名称、API Key、Base URL。
+3. 设置答题并发数和可选自定义提示词。
+4. 点击保存配置或开始答题。
+5. 面板展示状态、填写数量和工具执行统计。
+
+Provider 只负责生成答案；真实页面填写由本地工具层校验并执行，避免模型直接操作 DOM。
 
 ## 架构概览
 
-```
+```text
 src/
 ├── index.ts                  # UserScript 入口，注入样式并挂载 React renderer
-├── renderer/                 # React 面板、页面模式识别、拖拽 hook、UI 组件
+├── renderer/                 # React 面板、页面模式识别、拖拽 hook、基础 UI
 ├── store/                    # Zustand stores：课程、考试、面板状态
-├── services/                 # UI 与业务模块之间的服务适配层
-├── modules/                  # 业务自动化模块
+├── services/                 # React UI 与业务模块之间的适配层
+├── modules/                  # 课程自动化、资源保存、AI 答题等业务模块
 │   ├── auto-view.ts          # 自动查看页面
 │   ├── auto-hang.ts          # 视频挂机
 │   ├── auto-material-download.ts
@@ -62,34 +79,62 @@ src/
 │   ├── resource-download.ts
 │   ├── legacy-hang.ts
 │   ├── styles.ts             # scoped runtime CSS / Tailwind-like utilities
-│   └── exam/                 # AI 自动答题完整链路
-├── utils/                    # DOM、存储、通用工具
-├── constants/                # 常量和默认 Provider 配置
+│   └── exam/                 # AI 自动答题链路
+├── utils/                    # DOM、存储、页面运行时、通用工具
+├── constants/                # 默认 Provider 配置和常量
 └── types/                    # 公共类型
 ```
 
-### Renderer / Store / Service
+### 分层职责
 
-- `src/renderer/mount.tsx` 创建单一 React root，并通过 URL 监听和轮询识别课程页、全屏学习页、考试页。
+- `src/renderer/mount.tsx` 负责创建单一 React root，并通过 URL 监听和轮询识别当前页面模式。
 - `src/renderer/App.tsx` 根据页面模式渲染 `CoursePanel`、`FullScreenPanel` 或 `ExamPanel`。
-- `src/store/*` 只管理 UI 状态和任务状态，不直接写复杂 DOM。
-- `src/services/*` 把 React/Zustand 动作转换为业务模块 callbacks，让业务模块可以继续保持浏览器脚本式执行模型。
+- `src/store/*` 保存 UI 状态、任务配置和执行状态。
+- `src/services/*` 把 React/Zustand action 转换为业务模块调用，避免组件直接编排复杂 DOM 流程。
+- `src/modules/*` 保留浏览器脚本式自动化逻辑，负责扫描 OUCHN 页面、读写 DOM、下载资源和执行答题工具。
+- `src/utils/storage.ts` 统一处理 localStorage 与 Tampermonkey GM 存储。
 
-### AI 自动答题链路
+## AI 自动答题链路
 
-考试页入口现在由 `src/renderer/components/ExamPanel.tsx` 驱动，核心流程在 `src/services/exam-runner.ts`：
+核心入口是 `src/services/exam-runner.ts`：
 
-1. `question-extract.ts` 等待题目 DOM 稳定并提取 `Question[]`。
-2. `ai-provider.ts` 按题逐个调用 OpenAI 或 Claude Provider，并保留并发控制。
-3. `question-detect.ts` 负责题型、图片和装饰图过滤；React 面板也被排除，避免被误判为题图。
-4. `tool-executor.ts` 把 AI 返回答案转换为本地 `ExamToolUse[]`。
-5. `tool-registry.ts` 根据题型执行受控工具：单选、多选、填空、简答、匹配题。
-6. `answer-write.ts`、`answer-match.ts`、`answer-fill.ts` 保留 OUCHN 页面兼容细节和 DOM 写入策略。
-7. `ExamStats` 汇总 AI 返回数、工具成功/失败、跳过题目、图片降级等信息。
+1. `question-extract.ts` 等待题目 DOM 稳定并提取结构化 `Question[]`。
+2. `question-detect.ts` 判断题型、过滤装饰图，并识别图片题。
+3. `ai-provider.ts` 按题并发调用 OpenAI 或 Claude Provider。
+4. Provider 适配器通过 `provider-http.ts` 统一处理 `fetch`、`GM_xmlhttpRequest` 和重试。
+5. `tool-executor.ts` 将 AI 答案转换为本地 `ExamToolUse[]`。
+6. `tool-registry.ts` 按题型校验工具输入并分派执行。
+7. `answer-write.ts`、`answer-fill.ts`、`answer-match.ts` 处理单选、多选、填空、简答和匹配题写入。
+8. `ExamStats` 汇总提取数量、AI 返回数量、工具成功/失败、跳过题目和图片降级情况。
 
-Provider 只负责推理和返回答案；真实 DOM 写入留在本地工具层，避免模型直接操作页面。
+这条链路把“模型推理”和“页面执行”分开，便于定位 Provider 问题、题型解析问题和 DOM 写入问题。
 
-## 开发命令
+## 配置与存储
+
+- 课程自动化状态、返回 URL、课程配置和参考资料缓存仍使用 localStorage，方便跨页面跳转恢复任务。
+- AI 答题配置通过 `src/utils/storage.ts` 统一读写。
+- API Key 优先保存到 `GM_setValue`，读取时优先使用 `GM_getValue`。
+- 旧版 localStorage 中的 AI 配置会在读取时归一化，并迁移到 GM 存储。
+- OpenAI 和 Claude 的模型、API Key、Base URL 独立保存，切换 Provider 不会覆盖另一套配置。
+
+## 技术栈
+
+- TypeScript，target ES2020
+- React 19 + React DOM
+- Zustand
+- jQuery，用于兼容 OUCHN 页面和既有 DOM 自动化
+- tsup，IIFE/UserScript 构建
+- jsPDF + html2canvas，文档资源 PDF 保存
+- ESLint flat config + React Doctor + Prettier + Husky + lint-staged
+
+## 质量门禁
+
+- `pnpm run lint` 使用 ESLint flat config，并启用 `eslint-plugin-react-doctor` 推荐规则。
+- `pnpm run lint` 和 `pnpm run lint:fix` 都带 `--max-warnings=0`，ESLint warning 会阻塞 CI 和本地检查。
+- `lint-staged` 对 `*.{ts,tsx}` 执行 Prettier、`eslint --fix --max-warnings=0` 和 `tsc --noEmit`。
+- 当前项目关闭了不适用的 React Doctor 规则，例如 SSR/server/hydration、React Compiler、未使用生态规则和 DOM 自动化串行 await 微优化规则。
+
+## 本地开发
 
 ```bash
 pnpm install
@@ -101,59 +146,40 @@ pnpm run lint:fix
 pnpm run format
 ```
 
-提交前 Husky 会通过 lint-staged 自动执行 Prettier、ESLint 和 TypeScript 类型检查。
+`pnpm run build` 会输出带 UserScript header 的 `dist/index.global.js`。`dist/` 已被 `.gitignore` 忽略。
 
-## 使用说明
+## UserScript 能力
 
-### 课程页控制台
+构建配置在 `tsup.config.ts` 中维护 UserScript header：
 
-进入课程页后，右侧会出现“资源下载”控制台：
+- `@match https://lms.ouchn.cn/course/**`
+- `@match https://lms.ouchn.cn/exam/*/subjects*`
+- `@grant GM_download`
+- `@grant GM_getValue`
+- `@grant GM_setValue`
+- `@grant GM_xmlhttpRequest`
+- `@grant unsafeWindow`
+- `@connect *`
 
-1. “查看所有页面”会扫描未完成查看任务并自动进入/返回。
-2. “批量下载参考资料”会展开章节并按间隔触发附件下载。
-3. “一键全部挂机”会按设定间隔提交视频活动进度。
-
-### 全屏学习资源保存
-
-进入全屏学习活动页后，面板切换为“保存资源”模式：
-
-1. 点击“保存所有学习资源”。
-2. 脚本展开资源树并逐个保存视频或文档。
-3. 视频按文件资源保存，文档通过 jsPDF + html2canvas 转为 PDF。
-
-### AI 自动答题
-
-进入考试答题页后，面板切换为“AI 自动答题”：
-
-1. 在 OpenAI 或 Claude Tab 中填写模型名称、API Key、Base URL。
-2. 设置答题并发数和可选自定义提示词。
-3. 点击“保存配置”或直接“开始答题”。
-4. 面板显示当前状态、进度和工具执行统计。
-
-OpenAI 与 Claude 配置独立保存，切换 Provider 不会覆盖另一套输入。API Key 优先写入 GM 存储；旧版 localStorage 配置会在读取时迁移。
-
-## 配置与存储
-
-- 自动查看状态、返回 URL、课程配置和资料缓存仍使用 `localStorage`，便于跨页面跳转恢复任务。
-- AI 答题配置通过 `src/utils/storage.ts` 统一读写；API Key 优先写入 `GM_setValue`，读取时优先使用 `GM_getValue`。
-- 旧版本保存在 `localStorage` 的 AI 配置会在读取时归一化并迁移到 GM 存储。
-- OpenAI 和 Claude 的模型、API Key、Base URL 独立保存；当前激活 Provider 会镜像到顶层配置，供答题流程使用。
+新增 Tampermonkey API 或外部请求目标时，需要同步检查 `@grant` 和 `@connect`。
 
 ## 常见问题
 
-- **面板没有出现**: 确认 URL 是否匹配 `@match`，并检查 Tampermonkey 中脚本是否启用。
-- **AI 配置保存失败**: 确认 UserScript header 中包含 `GM_getValue` 和 `GM_setValue` grant，并在 Tampermonkey 中重新安装最新构建产物。
-- **AI 返回空答案或部分题跳过**: 查看面板状态和浏览器控制台中的 `ExamStats`，重点检查 Provider Base URL、模型名称、并发数和图片题降级日志。
-- **资源保存中断**: 保存资源和自动查看依赖当前 OUCHN 页面状态，执行期间避免刷新、手动跳转或关闭页面。
-- **样式异常**: 先确认页面里只存在一个 `#ouchn-react-renderer-root`，再检查是否有第三方插件修改了 OUCHN 页面 DOM。
+- **面板没有出现**: 确认 Tampermonkey 已启用脚本，并且 URL 命中 `@match`。
+- **课程任务没有继续执行**: 自动查看和资源保存依赖页面跳转状态，执行期间不要刷新或手动切换页面。
+- **参考资料下载失败**: 检查浏览器下载权限、Tampermonkey 下载权限和课程资源是否需要登录态。
+- **AI 配置保存失败**: 确认脚本 grant 中包含 `GM_getValue` 和 `GM_setValue`，并重新安装最新构建产物。
+- **AI 答题为空或部分跳过**: 检查 Provider Base URL、模型名称、API Key、并发数，以及浏览器控制台中的 `ExamStats`。
+- **匹配题填写失败**: OUCHN 匹配题 DOM 形态差异较大，脚本会依次尝试 Angular model、拖拽、点击匹配和隐藏输入等策略，最终结果以面板统计为准。
 
 ## 注意事项
 
 - 本脚本仅供学习交流使用。
 - 项目运行环境是浏览器 + Tampermonkey，不存在 Node.js 运行时。
-- 新增 Tampermonkey API 时需要同步更新 `tsup.config.ts` 的 `@grant`。
-- 新增外部请求目标时需要检查 UserScript `@connect` 策略。
-- 保存资源或 AI 答题执行期间，不建议手动切换页面或刷新。
+- 业务代码不要直接使用 Node.js 专属 API，例如 `fs`、`path`、`process`。
+- 涉及持久化时优先复用 `src/utils/storage.ts`。
+- 涉及 DOM 操作时优先检查 `src/utils/dom.ts`。
+- 保存资源或 AI 答题期间，不建议手动刷新、关闭或切换页面。
 
 ## License
 
