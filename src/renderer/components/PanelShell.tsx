@@ -29,6 +29,7 @@ export function PanelShell({ children, id, title }: PanelShellProps) {
       id={id}
       style={style}
     >
+      {/* eslint-disable-next-line react-doctor/no-static-element-interactions -- 面板标题栏是鼠标拖拽区域，不是点击触发控件；保留整条标题栏拖拽体验。 */}
       <div
         className="download-header flex cursor-move items-center justify-between gap-3 rounded-t-xl border-b border-slate-200 bg-slate-50 px-4 py-3 select-none"
         onMouseDown={handleDragStart}

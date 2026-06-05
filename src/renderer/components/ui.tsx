@@ -71,8 +71,12 @@ export function Textarea({ className, ...props }: TextareaHTMLAttributes<HTMLTex
   );
 }
 
-export function Label({ className, ...props }: LabelHTMLAttributes<HTMLLabelElement>) {
-  return <label className={cn('text-xs font-medium text-slate-700', className)} {...props} />;
+interface LabelProps extends Omit<LabelHTMLAttributes<HTMLLabelElement>, 'htmlFor'> {
+  htmlFor: string;
+}
+
+export function Label({ className, htmlFor, ...props }: LabelProps) {
+  return <label className={cn('text-xs font-medium text-slate-700', className)} {...props} htmlFor={htmlFor} />;
 }
 
 interface PanelSectionProps {
