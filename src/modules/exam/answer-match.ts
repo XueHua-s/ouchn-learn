@@ -3,23 +3,9 @@
  */
 
 import type { AnswerValue, Question } from '@/types/exam';
-import { log, warn } from '@/types/exam';
+import { warn } from '@/types/exam';
 import { getPageWindow, type AngularScope } from '@/utils/page-runtime';
-import { triggerAngularUpdate } from './answer-write';
-
-/** 序号字符 → 数字映射 */
-const CIRCLED_NUM_MAP: Record<string, string> = {
-  '①': '1',
-  '②': '2',
-  '③': '3',
-  '④': '4',
-  '⑤': '5',
-  '⑥': '6',
-  '⑦': '7',
-  '⑧': '8',
-  '⑨': '9',
-  '⑩': '10',
-};
+import { buildMatchingPlan, normalizeMatchingText, type MatchingPlan } from './matching-answer';
 
 type MatchingOptionLike = {
   id?: string | number;
@@ -31,30 +17,14 @@ type MatchingSubSubjectLike = {
   note?: MatchingOptionLike;
   answer_number?: string | number;
   answeredOption?: string | number;
-  answer_option_ids?: Array<string | number>;
   [key: string]: unknown;
 };
 
 type MatchingSubjectLike = {
   options?: MatchingOptionLike[];
   sub_subjects?: MatchingSubSubjectLike[];
-  unsaved?: boolean;
-  not_answered?: boolean;
   [key: string]: unknown;
 };
-
-function normalizeKey(k: string): string {
-  const trimmed = k.trim();
-  return CIRCLED_NUM_MAP[trimmed] || trimmed.replace(/[.、．:：\s]/g, '');
-}
-
-function normalizeMatchText(text: string): string {
-  return text
-    .replace(/[\s\u00a0]+/g, '')
-    .replace(/[.、．:：;；,，()（）【】]/g, '')
-    .replace(/\[|\]/g, '')
-    .toLowerCase();
-}
 
 function cleanVisibleText(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
@@ -68,42 +38,14 @@ function getPrimaryText(element: Element): string {
     .trim();
   if (directText) return cleanVisibleText(directText);
 
-  const firstLeaf = Array.from(element.querySelectorAll('span, p, [data-v-5512d720]')).find((node) => {
-    const text = cleanVisibleText(node.textContent || '');
-    return text.length > 0 && text.length < 120 && !node.querySelector('span, p');
-  });
-  return cleanVisibleText(firstLeaf?.textContent || element.textContent || '');
+  return cleanVisibleText(
+    element.querySelector('.content-center')?.firstElementChild?.textContent || element.textContent || '',
+  );
 }
 
 function textsMatch(candidate: string, expected: string): boolean {
-  const a = normalizeMatchText(candidate);
-  const b = normalizeMatchText(expected);
-  if (!a || !b) return false;
-  return a === b || a.includes(b) || b.includes(a);
-}
-
-function resolveSlotKey(rawKey: string, question: Question): string {
-  const normalized = normalizeKey(rawKey);
-  if (/^\d+$/.test(normalized)) return normalized;
-
-  const matched = question.matchingItems?.find((item) => textsMatch(item.stem, rawKey) || textsMatch(item.key, rawKey));
-  return matched?.key || normalized;
-}
-
-function resolveChoiceText(rawValue: string, question: Question): string {
-  const matched = question.matchingOptions?.find(
-    (option) =>
-      textsMatch(option.label, rawValue) || textsMatch(option.value, rawValue) || textsMatch(option.content, rawValue),
-  );
-  return matched?.content || rawValue.trim();
-}
-
-function resolveChoiceId(rawValue: string, question: Question): string | undefined {
-  const matched = question.matchingOptions?.find(
-    (option) =>
-      textsMatch(option.label, rawValue) || textsMatch(option.value, rawValue) || textsMatch(option.content, rawValue),
-  );
-  return matched?.value || matched?.label;
+  const a = normalizeMatchingText(candidate);
+  return a.length > 0 && a === normalizeMatchingText(expected);
 }
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
@@ -120,104 +62,6 @@ function getAngularScope(subjectEl: Element): AngularScope | null {
   }
 }
 
-/** 解析 AI 返回的匹配答案，兼容 JSON/箭头/冒号/数组等多种格式 */
-export function parseMatchingAnswer(answer: AnswerValue, question: Question): Map<string, string> {
-  const map = new Map<string, string>();
-
-  // 对象格式（AI 直接返回 JSON 对象）
-  if (typeof answer === 'object' && answer !== null && !Array.isArray(answer)) {
-    for (const [k, v] of Object.entries(answer)) {
-      map.set(resolveSlotKey(k, question), resolveChoiceText(String(v), question));
-    }
-    return map;
-  }
-
-  // 数组格式：按 matchingItems 顺序映射
-  if (Array.isArray(answer)) {
-    const stems = question.matchingItems || [];
-    answer.forEach((val, idx) => {
-      const key = stems[idx]?.key || stems[idx]?.stem?.match(/[①②③④⑤⑥⑦⑧⑨⑩]/)?.[0];
-      map.set(normalizeKey(key || String(idx + 1)), resolveChoiceText(String(val), question));
-    });
-    return map;
-  }
-
-  // 字符串格式
-  const text = String(answer).trim();
-
-  // 尝试 JSON 解析
-  try {
-    const obj = JSON.parse(text);
-    if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
-      for (const [k, v] of Object.entries(obj)) {
-        map.set(resolveSlotKey(k, question), resolveChoiceText(String(v), question));
-      }
-      return map;
-    }
-  } catch {
-    // 不是 JSON，继续文本解析
-  }
-
-  // 文本格式：①-A, ②→C, 1:A, cigarette:香烟 等
-  for (const line of text.split(/[,，;\n]+/)) {
-    const m = line.match(/(.+?)\s*[-=→>:：]+\s*(.+)/);
-    if (m) {
-      map.set(resolveSlotKey(m[1], question), resolveChoiceText(m[2], question));
-    }
-  }
-
-  return map;
-}
-
-/** DOM 侦测：输出匹配题区域的完整 DOM 特征 */
-function inspectMatchingDom(subjectEl: Element, questionDisplay: string): void {
-  const draggables = subjectEl.querySelectorAll(
-    '[draggable="true"], [dnd-draggable], [dnd-list], [ng-drop], ' +
-      '[data-rbd-draggable-id], [data-rbd-droppable-id], .drag-item, .drop-item',
-  );
-
-  const buttons = Array.from(subjectEl.querySelectorAll('button')).map((btn) => ({
-    title: btn.getAttribute('title'),
-    text: btn.textContent?.trim().substring(0, 40),
-  }));
-
-  const imgs = Array.from(subjectEl.querySelectorAll('img')).map((img) => ({
-    src: (img.src || '').substring(0, 100),
-    alt: img.alt,
-    size: `${img.naturalWidth}x${img.naturalHeight}`,
-  }));
-
-  const canvasList = subjectEl.querySelectorAll('canvas');
-
-  // 查找包含选项标签的节点
-  const choiceNodes = Array.from(subjectEl.querySelectorAll('*')).filter((el) => {
-    const t = el.textContent?.trim() || '';
-    return /^[A-F][：:]/.test(t) && t.length < 200;
-  });
-
-  const slotNodes = Array.from(subjectEl.querySelectorAll('*')).filter((el) => {
-    const t = el.textContent?.trim() || '';
-    return /^[①②③④⑤⑥⑦⑧⑨⑩]$/.test(t);
-  });
-
-  console.group(`[匹配题DOM检查] 题目 ${questionDisplay}`);
-  log('draggable 节点:', draggables.length);
-  log('button 列表:', buttons);
-  log('img 列表:', imgs);
-  log('canvas 数量:', canvasList.length);
-  log(
-    '选项节点 (A:-F:):',
-    choiceNodes.length,
-    choiceNodes.map((n) => n.textContent?.trim().substring(0, 60)),
-  );
-  log(
-    '槽位节点 (①-⑥):',
-    slotNodes.length,
-    slotNodes.map((n) => n.textContent?.trim()),
-  );
-  console.groupEnd();
-}
-
 /**
  * 填写匹配题（多级 fallback）
  */
@@ -226,119 +70,51 @@ export async function fillMatchingQuestion(
   question: Question,
   answer: AnswerValue,
 ): Promise<boolean> {
-  // DOM 侦测
-  inspectMatchingDom(subjectEl, question.displayIndex);
-
-  // 解析答案
-  const matchMap = parseMatchingAnswer(answer, question);
-  if (matchMap.size === 0) {
-    warn(`题目 ${question.displayIndex}: 无法解析匹配题答案`);
+  const plan = buildMatchingPlan(question, answer);
+  if (!plan.ok) {
+    warn('题目 ' + question.displayIndex + ': ' + plan.message);
     return false;
   }
-  log(`题目 ${question.displayIndex}: 匹配答案解析结果`, Object.fromEntries(matchMap));
+  // FIXED: 必须逐槽核对，不能以派发事件或部分写入冒充整题成功。
+  if (!subjectEl.isConnected || getOuchnMatchingRows(subjectEl).length !== plan.pairs.length) return false;
+  const scope = getAngularScope(subjectEl);
+  if (scope && resolveSubjectFromScope(scope)) {
+    // 已识别平台模型时，只走平台保存链路；失败后不能再猜测其他字段覆盖答案。
+    return (await tryOuchnAngularModel(subjectEl, plan.pairs)) && (await verifyMatchingResult(subjectEl, plan.pairs));
+  }
 
-  // 策略 A：OUCHN 匹配题 Angular 模型直接操作
-  const resultA = await tryOuchnAngularModel(subjectEl, question, matchMap);
-  if (resultA) return true;
-
-  // 策略 B：AngularJS scope 通用兜底
-  const resultB = await tryAngularScope(subjectEl, question.displayIndex, matchMap);
-  if (resultB) return true;
-
-  // 策略 C：拖拽 DOM
-  const resultC = await tryDragAndDrop(subjectEl, question.displayIndex, matchMap);
-  if (resultC) return true;
-
-  // 策略 D：按坐标模拟真人鼠标拖拽
-  const resultD = await tryHumanLikeMouseDrag(subjectEl, question.displayIndex, matchMap);
-  if (resultD) return true;
-
-  // 策略 E：OUCHN 词意匹配 drag-cloneable 结构
-  const resultE = await tryOuchnCloneableDrag(subjectEl, question.displayIndex, matchMap);
-  if (resultE) return true;
-
-  // 策略 F：点击式匹配（选项可点 + 槽位可点）
-  const resultF = await tryClickToMatch(subjectEl, question.displayIndex, matchMap);
-  if (resultF) return true;
-
-  // 策略 G：隐藏 input/select
-  const resultG = await tryHiddenInputs(subjectEl, question.displayIndex, matchMap);
-  if (resultG) return true;
-
-  // 所有策略失败
-  const hasImages = subjectEl.querySelectorAll('img').length > 5;
-  const hasCanvas = subjectEl.querySelectorAll('canvas').length > 0;
-  const hasDraggable = subjectEl.querySelectorAll('[draggable="true"], [dnd-draggable]').length > 0;
-
-  const reason = hasCanvas
-    ? 'matching_ui_is_canvas_only'
-    : hasImages && !hasDraggable
-      ? 'matching_ui_is_image_viewer'
-      : 'no_real_droppable_nodes_found';
-
-  warn(`题目 ${question.displayIndex}: 匹配题所有填写策略失败`, { reason, matchMap: Object.fromEntries(matchMap) });
+  // FIXED: 沙箱无法读取 Angular scope 时保留已知 OUCHN 拖拽结构的兼容路径。
+  // 源选项按稳定 ID 定位，目标按提取时的槽位序号定位，不点击任意按钮或猜测 ng-model。
+  for (const drag of [dispatchDragCloneable, humanLikeDrag]) {
+    const rows = getOuchnMatchingRows(subjectEl);
+    const sources = Array.from(subjectEl.querySelectorAll<HTMLElement>('.answer-pool .clone-area.drag-area'));
+    for (const { key, option } of plan.pairs) {
+      const candidates = sources.filter((source) => {
+        const id = getOptionId(source);
+        return id ? id === option.value : textsMatch(getPrimaryText(source), option.content);
+      });
+      const target = rows[Number(key) - 1]?.querySelector<HTMLElement>('[drag-type="to"]');
+      if (candidates.length !== 1 || !target) return false;
+      await drag(candidates[0], target);
+    }
+    if (await verifyMatchingResult(subjectEl, plan.pairs)) return true;
+  }
+  warn('题目 ' + question.displayIndex + ': 匹配槽位未通过写入校验');
   return false;
 }
 
-/** 策略 A：AngularJS scope */
-async function tryAngularScope(subjectEl: Element, qDisplay: string, matchMap: Map<string, string>): Promise<boolean> {
-  try {
-    const scope = getAngularScope(subjectEl);
-    if (!scope) return false;
-
-    // 遍历 scope 上常见的 answer 属性名
-    for (const key of ['answer', 'answers', 'matchAnswer', 'matching', 'matchingAnswers', 'subject']) {
-      const obj = scope[key];
-      if (!obj || typeof obj !== 'object') continue;
-
-      // 如果是数组（如 subject.answers），尝试按 index 匹配
-      if (Array.isArray(obj)) {
-        let filled = 0;
-        for (const [slotKey, choiceVal] of matchMap) {
-          const idx = parseInt(slotKey) - 1;
-          if (idx >= 0 && idx < obj.length) {
-            obj[idx] = choiceVal;
-            filled++;
-          }
-        }
-        if (filled > 0) {
-          scope.$apply?.();
-          log(`题目 ${qDisplay}: Angular scope[${key}] 数组模式填入 ${filled} 项`);
-          return true;
-        }
-        continue;
-      }
-
-      // 对象模式
-      const record = obj as Record<string, unknown>;
-      let filled = 0;
-      for (const [slotKey, choiceVal] of matchMap) {
-        if (slotKey in record || `slot_${slotKey}` in record) {
-          const realKey = slotKey in record ? slotKey : `slot_${slotKey}`;
-          record[realKey] = choiceVal;
-          filled++;
-        }
-      }
-      if (filled > 0) {
-        scope.$apply?.();
-        log(`题目 ${qDisplay}: Angular scope[${key}] 对象模式填入 ${filled} 项`);
-        return true;
-      }
-    }
-  } catch {
-    // ignore
-  }
-  return false;
+function getOptionId(element: Element | null | undefined): string | undefined {
+  return element?.getAttribute('data-option-id') || element?.id.match(/^drag-node-(\d+)$/)?.[1];
 }
 
 function resolveSubjectFromScope(scope: AngularScope): MatchingSubjectLike | null {
   const directSubject = scope.subject;
-  if (isObjectRecord(directSubject) && Array.isArray(directSubject.sub_subjects)) {
+  if (isObjectRecord(directSubject) && directSubject.type === 'matching' && Array.isArray(directSubject.sub_subjects)) {
     return directSubject as MatchingSubjectLike;
   }
 
   for (const value of Object.values(scope)) {
-    if (isObjectRecord(value) && Array.isArray(value.sub_subjects)) {
+    if (isObjectRecord(value) && value.type === 'matching' && Array.isArray(value.sub_subjects)) {
       return value as MatchingSubjectLike;
     }
   }
@@ -346,107 +122,71 @@ function resolveSubjectFromScope(scope: AngularScope): MatchingSubjectLike | nul
   return null;
 }
 
-function findMatchingOption(
-  subject: MatchingSubjectLike,
-  choiceVal: string,
-  question: Question,
-): MatchingOptionLike | null {
-  const choiceId = resolveChoiceId(choiceVal, question);
-  return (
-    subject.options?.find((option) => {
-      const id = String(option.id ?? '');
-      const content = String(option.content ?? '');
-      return textsMatch(id, choiceId || choiceVal) || textsMatch(content, choiceVal);
-    }) || null
-  );
+/** 验证 DOM 槽位与平台模型均对应目标选项；等待渲染，但不重复写入。 */
+async function verifyMatchingResult(subjectEl: Element, pairs: MatchingPlan): Promise<boolean> {
+  const check = () => {
+    const rows = getOuchnMatchingRows(subjectEl);
+    const scope = getAngularScope(subjectEl);
+    const model = scope ? resolveSubjectFromScope(scope) : null;
+    return (
+      subjectEl.isConnected &&
+      rows.length === pairs.length &&
+      pairs.every(({ key, option }) => {
+        const index = Number(key) - 1;
+        const target = rows[index]?.querySelector('[drag-type="to"]');
+        const clone = target?.querySelector('.clone-area');
+        const id = getOptionId(clone);
+        const domMatches = id
+          ? id === option.value
+          : Boolean(target && textsMatch(getPrimaryText(target), option.content));
+        const slot = model?.sub_subjects?.[index];
+        return (
+          domMatches &&
+          (!model ||
+            (String(slot?.answer_number) === option.value &&
+              String(slot?.answeredOption) === option.value &&
+              String(slot?.note?.id) === option.value))
+        );
+      })
+    );
+  };
+  if (check()) return true;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    if (check()) return true;
+  }
+  return false;
 }
 
-async function tryOuchnAngularModel(
-  subjectEl: Element,
-  question: Question,
-  matchMap: Map<string, string>,
-): Promise<boolean> {
+async function tryOuchnAngularModel(subjectEl: Element, pairs: MatchingPlan): Promise<boolean> {
   const scope = getAngularScope(subjectEl);
-  if (!scope) return false;
-
-  const subject = resolveSubjectFromScope(scope);
-  if (!subject?.sub_subjects?.length || !subject.options?.length) return false;
-
-  let filled = 0;
-  for (const [slotKey, choiceVal] of matchMap) {
-    const idx = parseInt(slotKey, 10) - 1;
-    const subSubject = subject.sub_subjects[idx];
-    const option = findMatchingOption(subject, choiceVal, question);
-    if (!subSubject || !option) continue;
-
-    subSubject.note = option;
-    subSubject.answer_number = option.id;
-    subSubject.answeredOption = option.id;
-    subSubject.answer_option_ids = option.id === undefined ? [] : [option.id];
-    callScopeFunction(scope, 'onChangeSubmission', subSubject);
-    filled++;
+  const subject = scope ? resolveSubjectFromScope(scope) : null;
+  if (!scope || !subject?.sub_subjects?.length || !subject.options?.length) return false;
+  if (subject.sub_subjects.length !== pairs.length) return false;
+  const writes = pairs.map(({ key, option }) => ({
+    slot: subject.sub_subjects?.[Number(key) - 1],
+    option: subject.options?.find((candidate) => String(candidate.id) === option.value),
+  }));
+  if (writes.some((write) => !write.slot || !write.option)) return false;
+  let saveScope: AngularScope | undefined = scope;
+  while (saveScope && typeof saveScope.onChangeSubmission !== 'function') saveScope = saveScope.$parent;
+  if (!saveScope) return false;
+  // FIXED: 全量解析成功才修改模型；只写已确认的字段，不能强行把未填满的题标为已完成。
+  for (const write of writes) {
+    write.slot!.note = write.option!;
+    write.slot!.answer_number = write.option!.id;
+    // 平台 collectAnswerData 读取 answeredOption；只改变 note/answer_number 会出现显示已填但提交为空。
+    write.slot!.answeredOption = write.option!.id;
   }
-
-  if (filled === 0) return false;
-
-  subject.unsaved = true;
-  subject.not_answered = false;
-
   try {
     scope.$apply?.();
   } catch {
     scope.$evalAsync?.();
   }
-
-  subjectEl.dispatchEvent(new Event('change', { bubbles: true }));
-  callScopeFunction(scope, 'dragAddCallback', subject);
-  callScopeFunction(scope, 'onChangeSubmission', subject);
-  log(`题目 ${question.displayIndex}: OUCHN Angular 匹配模型写入 ${filled} 项`);
+  // 平台 onChangeSubmission 接收当前匹配题。dragAddCallback 会重新解析拖拽 DOM，
+  // 直接模型写入时调用它可能以尚未渲染的旧节点覆盖新答案，因此只通知保存回调。
+  (saveScope.onChangeSubmission as (value: MatchingSubjectLike) => void).call(saveScope, subject);
   return true;
-}
-
-function callScopeFunction(scope: AngularScope, name: string, arg: MatchingSubjectLike): void {
-  let current: AngularScope | undefined = scope;
-  while (current) {
-    const fn = current[name];
-    if (typeof fn === 'function') {
-      try {
-        (fn as (value: MatchingSubjectLike) => void).call(current, arg);
-      } catch {
-        // ignore callback mismatch; model mutation is the primary write path.
-      }
-      return;
-    }
-    current = current.$parent;
-  }
-}
-
-/** 策略 B：拖拽 */
-async function tryDragAndDrop(subjectEl: Element, qDisplay: string, matchMap: Map<string, string>): Promise<boolean> {
-  const draggables = Array.from(
-    subjectEl.querySelectorAll('[draggable="true"], [dnd-draggable], .drag-item'),
-  ) as HTMLElement[];
-  const droppables = Array.from(
-    subjectEl.querySelectorAll('[dnd-list], [ng-drop], .drop-zone, .match-target'),
-  ) as HTMLElement[];
-
-  if (draggables.length === 0 || droppables.length === 0) return false;
-
-  let filled = 0;
-  for (const [_slotKey, choiceVal] of matchMap) {
-    const source = draggables.find((el) => el.textContent?.trim().startsWith(choiceVal));
-    const target = droppables.find(
-      (el) => el.textContent?.trim().includes(_slotKey) || el.closest(`[data-index="${_slotKey}"]`),
-    );
-    if (source && target) {
-      if (!dispatchStandardDrag(source, target)) continue;
-      await new Promise((r) => setTimeout(r, 200));
-      filled++;
-    }
-  }
-
-  if (filled > 0) log(`题目 ${qDisplay}: 拖拽模式填入 ${filled} 项`);
-  return filled > 0;
 }
 
 function getOuchnMatchingRows(subjectEl: Element): HTMLElement[] {
@@ -468,7 +208,6 @@ function createDragEvent(type: string, dataTransfer: DataTransfer): DragEvent | 
 
 function dispatchDragCloneable(source: HTMLElement, target: HTMLElement): boolean {
   const pageWin = getPageWindow(source);
-  const dt = new pageWin.DataTransfer();
   const events: Array<[HTMLElement, string]> = [
     [source, 'mousedown'],
     [source, 'dragstart'],
@@ -480,6 +219,7 @@ function dispatchDragCloneable(source: HTMLElement, target: HTMLElement): boolea
   ];
 
   try {
+    const dt = new pageWin.DataTransfer();
     events.forEach(([el, type]) => {
       if (type.startsWith('drag') || type === 'drop') {
         el.dispatchEvent(createDragEvent(type, dt));
@@ -490,21 +230,6 @@ function dispatchDragCloneable(source: HTMLElement, target: HTMLElement): boolea
     return true;
   } catch (err) {
     warn('OUCHN 匹配题拖拽事件派发失败，已跳过拖拽兜底:', err);
-    return false;
-  }
-}
-
-function dispatchStandardDrag(source: HTMLElement, target: HTMLElement): boolean {
-  try {
-    const dt = new (getPageWindow(source).DataTransfer)();
-    source.dispatchEvent(createDragEvent('dragstart', dt));
-    target.dispatchEvent(createDragEvent('dragenter', dt));
-    target.dispatchEvent(createDragEvent('dragover', dt));
-    target.dispatchEvent(createDragEvent('drop', dt));
-    source.dispatchEvent(createDragEvent('dragend', dt));
-    return true;
-  } catch (err) {
-    warn('匹配题标准拖拽事件派发失败，已跳过拖拽兜底:', err);
     return false;
   }
 }
@@ -570,151 +295,4 @@ async function humanLikeDrag(source: HTMLElement, target: HTMLElement): Promise<
     warn('匹配题坐标拖拽失败，已跳过真人式拖拽兜底:', err);
     return false;
   }
-}
-
-async function tryHumanLikeMouseDrag(
-  subjectEl: Element,
-  qDisplay: string,
-  matchMap: Map<string, string>,
-): Promise<boolean> {
-  const rows = getOuchnMatchingRows(subjectEl);
-  const sources = Array.from(
-    subjectEl.querySelectorAll(
-      '.answer-pool .clone-area.drag-area[data-option-id], .answer-pool .clone-area.drag-area, [drag-type="from"] .clone-area',
-    ),
-  ) as HTMLElement[];
-
-  if (rows.length === 0 || sources.length === 0) return false;
-
-  let filled = 0;
-  for (const [slotKey, choiceVal] of matchMap) {
-    const row = rows[parseInt(slotKey, 10) - 1];
-    const target = row?.querySelector('[drag-type="to"]') as HTMLElement | null;
-    const source = sources.find(
-      (el) => textsMatch(getPrimaryText(el), choiceVal) || textsMatch(el.dataset.optionId || '', choiceVal),
-    );
-    if (!source || !target) continue;
-
-    const ok = await humanLikeDrag(source, target);
-    await new Promise((r) => setTimeout(r, 250));
-    if (ok) filled++;
-  }
-
-  if (filled > 0) log(`题目 ${qDisplay}: 坐标鼠标拖拽填入 ${filled} 项`);
-  return filled > 0;
-}
-
-async function tryOuchnCloneableDrag(
-  subjectEl: Element,
-  qDisplay: string,
-  matchMap: Map<string, string>,
-): Promise<boolean> {
-  const rows = getOuchnMatchingRows(subjectEl);
-  const sources = Array.from(
-    subjectEl.querySelectorAll(
-      '.answer-pool .clone-area.drag-area[data-option-id], .answer-pool .clone-area.drag-area',
-    ),
-  ) as HTMLElement[];
-
-  if (rows.length === 0 || sources.length === 0) return false;
-
-  let filled = 0;
-  for (const [slotKey, choiceVal] of matchMap) {
-    const rowIndex = parseInt(slotKey, 10) - 1;
-    const row = rows[rowIndex];
-    if (!row) continue;
-
-    const source = sources.find(
-      (el) => textsMatch(getPrimaryText(el), choiceVal) || textsMatch(el.dataset.optionId || '', choiceVal),
-    );
-    const target = row.querySelector('[drag-type="to"]') as HTMLElement | null;
-    if (!source || !target) continue;
-
-    if (!dispatchDragCloneable(source, target)) continue;
-    target.dispatchEvent(new Event('change', { bubbles: true }));
-    await new Promise((r) => setTimeout(r, 250));
-
-    if (target.textContent?.trim() || target.querySelector('.clone-area')) {
-      filled++;
-    } else {
-      // 有些 Angular 拖拽指令不会同步 DOM 文本，但 drop 已进入回调；仍计入并依赖后续提交验证。
-      filled++;
-    }
-  }
-
-  if (filled > 0) log(`题目 ${qDisplay}: OUCHN 词意匹配拖拽填入 ${filled} 项`);
-  return filled > 0;
-}
-
-/** 策略 C：点击匹配 */
-async function tryClickToMatch(subjectEl: Element, qDisplay: string, matchMap: Map<string, string>): Promise<boolean> {
-  // 找所有可点击的选项和槽位
-  const allClickable = Array.from(subjectEl.querySelectorAll('*')).filter((el) => {
-    const style = window.getComputedStyle(el);
-    return style.cursor === 'pointer' || el.tagName === 'BUTTON' || el.getAttribute('role') === 'button';
-  }) as HTMLElement[];
-
-  if (allClickable.length === 0) return false;
-
-  let filled = 0;
-  for (const [slotKey, choiceVal] of matchMap) {
-    // 找槽位
-    const slotEl = allClickable.find((el) => {
-      const t = el.textContent?.trim() || '';
-      const circled = Object.entries(CIRCLED_NUM_MAP).find(([_, v]) => v === slotKey)?.[0];
-      return t === slotKey || t === circled || t.includes(`${circled}`) || t.includes(`${slotKey}.`);
-    });
-    // 找选项
-    const choiceEl = allClickable.find((el) => {
-      const t = el.textContent?.trim() || '';
-      return t.startsWith(`${choiceVal}：`) || t.startsWith(`${choiceVal}:`) || t === choiceVal;
-    });
-
-    if (slotEl && choiceEl) {
-      choiceEl.click();
-      await new Promise((r) => setTimeout(r, 150));
-      slotEl.click();
-      await new Promise((r) => setTimeout(r, 150));
-      filled++;
-    }
-  }
-
-  if (filled > 0) log(`题目 ${qDisplay}: 点击模式填入 ${filled} 项`);
-  return filled > 0;
-}
-
-/** 策略 D：隐藏 input/select */
-async function tryHiddenInputs(subjectEl: Element, qDisplay: string, matchMap: Map<string, string>): Promise<boolean> {
-  const hiddenInputs = Array.from(
-    subjectEl.querySelectorAll('input[type="hidden"], select, [ng-model]'),
-  ) as HTMLElement[];
-
-  if (hiddenInputs.length === 0) return false;
-
-  let filled = 0;
-  for (const [slotKey, choiceVal] of matchMap) {
-    const input = hiddenInputs.find((el) => {
-      const name = el.getAttribute('name') || el.getAttribute('ng-model') || '';
-      return name.includes(slotKey) || name.includes(`match_${slotKey}`);
-    });
-    if (input) {
-      if (input instanceof HTMLSelectElement) {
-        const option = Array.from(input.options).find((o) => o.value === choiceVal || o.text.startsWith(choiceVal));
-        if (option) {
-          input.value = option.value;
-          input.dispatchEvent(new Event('change', { bubbles: true }));
-          filled++;
-        }
-      } else if (input instanceof HTMLInputElement) {
-        input.value = choiceVal;
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-        triggerAngularUpdate(input, choiceVal);
-        filled++;
-      }
-    }
-  }
-
-  if (filled > 0) log(`题目 ${qDisplay}: 隐藏输入模式填入 ${filled} 项`);
-  return filled > 0;
 }

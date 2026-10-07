@@ -80,10 +80,9 @@ function readBackValue(el: HTMLElement): string {
 }
 
 /**
- * 写入 + 宽松校验。
+ * 写入后等待并校验读回值。
  * FIXED: 不做重试写入——AngularJS 页面上重复 execCommand 会破坏已写入的内容。
- * 校验只是信息性的，即使校验失败也认为写入已执行（返回 true），
- * 因为 Angular digest 可能延迟同步 DOM，读回值不可靠。
+ * Angular digest 可延迟同步，因此重复读回而不重复 execCommand；空值或旧值不能算成功。
  */
 export async function writeWithVerify(
   el: HTMLElement,
@@ -93,35 +92,17 @@ export async function writeWithVerify(
   // 写入一次
   writeFn(el, text);
 
-  // 等待框架 digest
-  await new Promise((r) => setTimeout(r, 200));
-
-  // 宽松校验：只检查元素是否有内容（不要求完全一致，Angular 可能会做格式化）
-  const actual = readBackValue(el);
-  if (actual.length > 0) {
-    return true;
+  const normalize = (value: string) =>
+    value
+      .replace(/\r\n/g, '\n')
+      .replace(/\u00a0/g, ' ')
+      .trim();
+  for (const delay of [200, 300, 500]) {
+    await new Promise((r) => setTimeout(r, delay));
+    if (el.isConnected && normalize(readBackValue(el)) === normalize(text)) return true;
   }
-
-  // 读回为空——可能框架还没同步，再等一轮
-  await new Promise((r) => setTimeout(r, 500));
-  const retryRead = readBackValue(el);
-  if (retryRead.length > 0) {
-    return true;
-  }
-
-  // 仍然为空，尝试直接设置 textContent/value 作为最后手段
-  warn('writeWithVerify: 首次写入后读回为空，尝试 fallback 直写');
-  if (el instanceof HTMLTextAreaElement) {
-    el.value = text;
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-  } else {
-    el.textContent = text;
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-  }
-  triggerAngularUpdate(el, text);
-
-  return true;
+  warn('writeWithVerify: 写入后的值未通过校验');
+  return false;
 }
 
 /**

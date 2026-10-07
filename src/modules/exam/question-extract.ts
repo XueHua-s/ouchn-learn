@@ -188,11 +188,8 @@ function extractVueWrapperPrimaryText(element: Element): string {
     .trim();
   if (directText) return cleanMatchingText(directText);
 
-  const firstLeaf = Array.from(element.querySelectorAll('span, p, [data-v-5512d720]')).find((node) => {
-    const text = cleanMatchingText(node.textContent || '');
-    return text.length > 0 && text.length < 120 && !node.querySelector('span, p');
-  });
-  return cleanMatchingText(firstLeaf?.textContent || element.textContent || '');
+  // Vue 富文本的第一个子容器保存完整内容；不能仅取首个短叶子，否则多段 SQL 会被截断。
+  return cleanMatchingText(element.firstElementChild?.textContent || element.textContent || '');
 }
 
 function getMatchingPanelText(panel: Element): string {
@@ -230,10 +227,11 @@ function extractMatchingQuestionData(element: Element): {
   const seenOptions = new Set<string>();
   poolElements.forEach((poolEl, idx) => {
     const content = getMatchingPanelText(poolEl);
-    if (!content || seenOptions.has(content)) return;
-    seenOptions.add(content);
-
-    const optionId = poolEl.getAttribute('data-option-id') || '';
+    const optionId = poolEl.getAttribute('data-option-id') || poolEl.id.match(/^drag-node-(\d+)$/)?.[1] || '';
+    // 同文案可能对应不同选项 ID，必须保留，让解析器拒绝歧义或按 ID 精确定位。
+    const identity = optionId || content;
+    if (!content || seenOptions.has(identity)) return;
+    seenOptions.add(identity);
     const label = optionId || String.fromCharCode(65 + options.length);
     options.push({ label, content, value: optionId || String(idx + 1) });
   });
@@ -263,46 +261,126 @@ function extractAnalysisSubQuestions(parentElement: Element, parentIndex: number
   return subSubjectElements.map((subElement, idx) => {
     const parsedSubIndex = parseQuestionIndex(subElement);
     const subIndex = parsedSubIndex || idx + 1;
-    const { type, rawTypeText } = detectQuestionType(subElement);
-    const scoreEl = subElement.querySelector('.summary-sub-title');
-    const scoreText = scoreEl?.textContent?.trim() || '';
-    const subDescEl = subElement.querySelector(SUBJECT_DESCRIPTION_SELECTOR);
-    const subDescription = subDescEl?.textContent?.trim() || '';
-    const description = [parentDescription, subDescription].filter(Boolean).join('\n\n');
-    const images = extractQuestionImages(subElement);
-    const options = extractChoiceOptions(subElement);
-    const questionType = type === 'unknown' && options.length > 0 ? 'single_selection' : type;
-    const displayIndex = buildSubDisplayIndex(parentIndex, subIndex);
-
-    const question: Question = {
-      index: buildSubQuestionIndex(parentIndex, subIndex),
-      parentIndex,
-      subIndex,
-      displayIndex,
-      type: questionType,
+    // FIXED: 子题必须走与普通题相同的数据提取，尤其是匹配答案池、空位和完形下拉选项。
+    const question = buildQuestion(
+      subElement,
+      buildSubQuestionIndex(parentIndex, subIndex),
+      buildSubDisplayIndex(parentIndex, subIndex),
       sectionTitle,
-      scoreText,
-      description,
-      rawText: [parentDescription, subElement.textContent?.trim() || '']
-        .filter(Boolean)
-        .join('\n\n')
-        .substring(0, 2000),
-      blankCount: 0,
-      hasImage: images.length > 0,
-      images,
-      rawClassName: subElement.className,
-      rawTypeText,
-      modelHints: [
-        `综合题 ${parentIndex} 的第 ${subIndex} 小题（人类显示题号 ${displayIndex}），回填时需要定位到嵌套 .sub-subject`,
-      ],
-    };
-
-    if (['single_selection', 'multiple_selection', 'true_or_false'].includes(question.type) || options.length > 0) {
-      question.options = options;
-    }
+    );
+    question.parentIndex = parentIndex;
+    question.subIndex = subIndex;
+    question.description = [parentDescription, question.description].filter(Boolean).join('\n\n');
+    question.rawText = [parentDescription, question.rawText].filter(Boolean).join('\n\n').substring(0, 2000);
+    question.modelHints.push('综合题 ' + parentIndex + ' 的第 ' + subIndex + ' 小题');
 
     return question;
   });
+}
+
+function buildQuestion(element: Element, index: number, displayIndex: string, sectionTitle: string): Question {
+  const { type, rawTypeText } = detectQuestionType(element);
+  const description = element.querySelector(SUBJECT_DESCRIPTION_SELECTOR)?.textContent?.trim() || '';
+  const scoreText = element.querySelector('.summary-sub-title')?.textContent?.trim() || '';
+  // 提取图片
+  const images = extractQuestionImages(element);
+  const hasImage = images.length > 0;
+
+  // 完形填空题的全部派生字段（description/rawText/选项/空位数/modelHint）一次性算出，
+  // 避免上层散落多处 querySelector(CLOZE_SELECT_SELECTOR) 复述同一判断。
+  const clozeData = type === 'fill_in_blank' && isClozeElement(element) ? buildClozeQuestionData(element) : null;
+
+  // 检测填空空位数（去重：同一个元素只算一次）
+  let blankCount = 0;
+  if (type === 'fill_in_blank') {
+    if (clozeData) {
+      blankCount = clozeData.blankCount;
+    } else {
+      const descBlanks = new Set(Array.from(element.querySelectorAll(BLANK_IN_DESCRIPTION_SELECTOR)));
+      if (descBlanks.size > 0) {
+        blankCount = descBlanks.size;
+      } else {
+        const allBlanks = new Set(
+          Array.from(element.querySelectorAll(`${BLANK_ANSWER_SELECTOR}, [contenteditable="true"]`)),
+        );
+        blankCount = allBlanks.size;
+      }
+    }
+  }
+
+  // 构建 modelHints
+  const modelHints: string[] = [];
+  if (hasImage) {
+    modelHints.push('此题包含图片');
+    const questionText = element.textContent || '';
+    IMAGE_HINT_KEYWORDS.forEach((kw) => {
+      if (questionText.includes(kw)) {
+        modelHints.push(`图片关键词: ${kw}`);
+      }
+    });
+  }
+  if (blankCount > 1) {
+    modelHints.push(`此题有 ${blankCount} 个空位，请返回数组答案`);
+  }
+  if (clozeData) {
+    modelHints.push(clozeData.modelHint);
+  }
+
+  const descriptionForModel = clozeData?.description ?? description;
+  const rawText = clozeData?.rawText ?? (element.textContent?.trim() || '');
+
+  const question: Question = {
+    index,
+    displayIndex,
+    type,
+    sectionTitle,
+    scoreText,
+    description: descriptionForModel,
+    rawText: rawText.substring(0, 2000),
+    blankCount,
+    hasImage,
+    images,
+    rawClassName: element.className,
+    rawTypeText,
+    modelHints,
+  };
+
+  // 提取选项（选择题、判断题）
+  if (['single_selection', 'multiple_selection', 'true_or_false'].includes(type)) {
+    question.options = extractChoiceOptions(element);
+  }
+
+  if (clozeData) {
+    question.options = clozeData.options;
+  }
+
+  // unknown 类型也尝试提取选项（万一有选项结构）
+  if (type === 'unknown') {
+    const options = extractChoiceOptions(element);
+    if (options.length > 0) {
+      question.options = options;
+      if (element.querySelector('input[type="radio"]')) {
+        question.type = 'single_selection';
+      } else if (element.querySelector('input[type="checkbox"]')) {
+        question.type = 'multiple_selection';
+      }
+    }
+  }
+
+  // 匹配题：提取左侧题干项和答案池
+  if (question.type === 'matching') {
+    const { items: matchingItems, options: matchingOptions } = extractMatchingQuestionData(element);
+
+    question.matchingItems = matchingItems;
+    question.matchingOptions = matchingOptions;
+    question.modelHints.push(
+      `匹配题：左侧有 ${matchingItems.length} 项，答案池有 ${matchingOptions.length} 个选项`,
+      `左侧词汇: ${matchingItems.map((item) => `${item.key}. ${item.stem}`).join(' | ')}`,
+      `答案池: ${matchingOptions.map((option) => `${option.label}: ${option.content}`).join(' | ')}`,
+    );
+  }
+
+  return question;
 }
 
 /**
@@ -321,7 +399,7 @@ export function extractQuestions(): Question[] {
     fallbackIndex++;
 
     // 检测题型
-    const { type, rawTypeText } = detectQuestionType(element);
+    const { type } = detectQuestionType(element);
 
     // 获取题目序号 - 多选择器兜底
     let index = parseQuestionIndex(element);
@@ -347,8 +425,6 @@ export function extractQuestions(): Question[] {
       index = fallbackIndex;
     }
 
-    const scoreText = scoreEl?.textContent?.trim() || '';
-
     // 获取章节标题
     const sectionTitle = getCurrentSectionTitle(element);
 
@@ -359,104 +435,7 @@ export function extractQuestions(): Question[] {
       return;
     }
 
-    // 提取图片
-    const images = extractQuestionImages(element);
-    const hasImage = images.length > 0;
-
-    // 完形填空题的全部派生字段（description/rawText/选项/空位数/modelHint）一次性算出，
-    // 避免上层散落多处 querySelector(CLOZE_SELECT_SELECTOR) 复述同一判断。
-    const clozeData = type === 'fill_in_blank' && isClozeElement(element) ? buildClozeQuestionData(element) : null;
-
-    // 检测填空空位数（去重：同一个元素只算一次）
-    let blankCount = 0;
-    if (type === 'fill_in_blank') {
-      if (clozeData) {
-        blankCount = clozeData.blankCount;
-      } else {
-        const descBlanks = new Set(Array.from(element.querySelectorAll(BLANK_IN_DESCRIPTION_SELECTOR)));
-        if (descBlanks.size > 0) {
-          blankCount = descBlanks.size;
-        } else {
-          const allBlanks = new Set(
-            Array.from(element.querySelectorAll(`${BLANK_ANSWER_SELECTOR}, [contenteditable="true"]`)),
-          );
-          blankCount = allBlanks.size;
-        }
-      }
-    }
-
-    // 构建 modelHints
-    const modelHints: string[] = [];
-    if (hasImage) {
-      modelHints.push('此题包含图片');
-      const questionText = element.textContent || '';
-      IMAGE_HINT_KEYWORDS.forEach((kw) => {
-        if (questionText.includes(kw)) {
-          modelHints.push(`图片关键词: ${kw}`);
-        }
-      });
-    }
-    if (blankCount > 1) {
-      modelHints.push(`此题有 ${blankCount} 个空位，请返回数组答案`);
-    }
-    if (clozeData) {
-      modelHints.push(clozeData.modelHint);
-    }
-
-    const descriptionForModel = clozeData?.description ?? description;
-    const rawText = clozeData?.rawText ?? (element.textContent?.trim() || '');
-
-    const question: Question = {
-      index,
-      displayIndex: buildTopDisplayIndex(index),
-      type,
-      sectionTitle,
-      scoreText,
-      description: descriptionForModel,
-      rawText: rawText.substring(0, 2000),
-      blankCount,
-      hasImage,
-      images,
-      rawClassName: element.className,
-      rawTypeText,
-      modelHints,
-    };
-
-    // 提取选项（选择题、判断题）
-    if (['single_selection', 'multiple_selection', 'true_or_false'].includes(type)) {
-      question.options = extractChoiceOptions(element);
-    }
-
-    if (clozeData) {
-      question.options = clozeData.options;
-    }
-
-    // unknown 类型也尝试提取选项（万一有选项结构）
-    if (type === 'unknown') {
-      const options = extractChoiceOptions(element);
-      if (options.length > 0) {
-        question.options = options;
-        if (element.querySelector('input[type="radio"]')) {
-          question.type = 'single_selection';
-        } else if (element.querySelector('input[type="checkbox"]')) {
-          question.type = 'multiple_selection';
-        }
-      }
-    }
-
-    // 匹配题：提取左侧题干项和答案池
-    if (question.type === 'matching') {
-      const { items: matchingItems, options: matchingOptions } = extractMatchingQuestionData(element);
-
-      question.matchingItems = matchingItems;
-      question.matchingOptions = matchingOptions;
-      question.modelHints.push(
-        `匹配题：左侧有 ${matchingItems.length} 项，答案池有 ${matchingOptions.length} 个选项`,
-        `左侧词汇: ${matchingItems.map((item) => `${item.key}. ${item.stem}`).join(' | ')}`,
-        `答案池: ${matchingOptions.map((option) => `${option.label}: ${option.content}`).join(' | ')}`,
-      );
-    }
-
+    const question = buildQuestion(element, index, buildTopDisplayIndex(index), sectionTitle);
     questions.push(question);
   });
 

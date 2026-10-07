@@ -109,9 +109,10 @@ export function ExamPanel() {
 
       <StatusMessage status={state.status} />
       {state.stats ? (
-        <div className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800">
+        <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-800">
           <KeyRound className="h-4 w-4" />
-          填写 {state.stats.filledCount}/{state.stats.extractedCount}，工具成功 {state.stats.toolSucceededCount}
+          已校验填写 {state.stats.filledCount}/{state.stats.extractedCount} 个作答项，失败 {state.stats.toolFailedCount}{' '}
+          项
         </div>
       ) : null}
     </PanelShell>
