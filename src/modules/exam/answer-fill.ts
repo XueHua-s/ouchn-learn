@@ -76,29 +76,25 @@ function findAnswerEditors(subjectEl: Element, type: QuestionType): HTMLElement[
  *
  * FIXED: OUCHN 的 Simditor 通常会维护一个隐藏 textarea 作为表单提交字段；只写主编辑器
  *        而忽略 textarea，提交时可能拿到空字符串。这里把所有 fallback 编辑器都写一遍并
- *        用 writeWithVerify 校验，任何一个 fallback 失败都会被记录到日志（但不当作主流程失败，
- *        因为主编辑器已写入并触发了 angular digest，提交字段同步是"加固"层）。
- *
- * 返回成功同步的 fallback 数量；调用方仅用于日志，不影响 fillFailedQuestions 计数，
- * 避免主流程因为隐藏字段语义不明而误报失败。
+ *        用 writeWithVerify 校验。提交字段未同步时不能把整题报告为成功。
  */
 async function syncEssayFallbackEditors(
   subjectEl: Element,
   primaryEditor: HTMLElement,
   answerText: string,
-): Promise<number> {
+): Promise<boolean> {
   const fallbackEditors = Array.from(subjectEl.querySelectorAll(ESSAY_FALLBACK_EDITOR_SELECTOR)) as HTMLElement[];
 
-  let synced = 0;
+  let verified = true;
   for (const editor of fallbackEditors) {
     if (editor === primaryEditor) continue;
     if (isInsideSubjectDescription(editor)) continue;
 
     const writeFn = editor instanceof HTMLTextAreaElement ? fillTextarea : fillEditable;
     const ok = await writeWithVerify(editor, answerText, writeFn);
-    if (ok) synced++;
+    if (!ok) verified = false;
   }
-  return synced;
+  return verified;
 }
 
 /**
@@ -118,8 +114,8 @@ function fillChoiceQuestion(subjectEl: Element, question: Question, answer: Answ
     if (option && option.value) {
       const input = subjectEl.querySelector(`input[ng-value="${option.value}"]`) as HTMLInputElement;
       if (input) {
-        input.click();
-        return true;
+        if (!input.checked) input.click();
+        return input.checked;
       }
     }
   }
@@ -162,11 +158,11 @@ function fillChoiceQuestion(subjectEl: Element, question: Question, answer: Answ
   if (targetEl) {
     const input = targetEl.querySelector('input[type="radio"], input[type="checkbox"]') as HTMLInputElement;
     if (input) {
-      input.click();
-      return true;
+      if (!input.checked) input.click();
+      return input.checked;
     }
     (targetEl as HTMLElement).click();
-    return true;
+    return Boolean(targetEl.querySelector<HTMLInputElement>('input:checked'));
   }
   return false;
 }
@@ -186,31 +182,24 @@ function fillMultipleChoiceQuestion(subjectEl: Element, _question: Question, ans
       : [];
   if (answerLabels.length === 0) return false;
 
-  let filled = 0;
+  const wanted = new Set(answerLabels.map((label) => label.replace(/[.、．\s]/g, '')));
   // FIXED: 把 querySelectorAll 提到循环外，避免每个 label 都重新扫描 DOM。
   const optionElements = Array.from(subjectEl.querySelectorAll(OPTION_SELECTOR));
-  answerLabels.forEach((label) => {
-    const cleanLabel = label.replace(/[.、．\s]/g, '');
-    const targetEl = optionElements.find((optEl) => {
-      const indexEl = optEl.querySelector('.option-index');
-      const optText =
-        indexEl?.textContent
-          ?.trim()
-          .replace(/[.、．\s]/g, '')
-          .toUpperCase() || '';
-      return optText === cleanLabel;
-    });
-    if (targetEl) {
-      const input = targetEl.querySelector('input[type="checkbox"]') as HTMLInputElement;
-      if (input && !input.checked) {
-        input.click();
-        filled++;
-      } else if (input?.checked) {
-        filled++;
-      }
-    }
-  });
-  return filled > 0;
+  const options = optionElements.map((element) => ({
+    label:
+      element
+        .querySelector('.option-index')
+        ?.textContent?.replace(/[.、．\s]/g, '')
+        .toUpperCase() || '',
+    input: element.querySelector<HTMLInputElement>('input[type="checkbox"]'),
+  }));
+  if ([...wanted].some((label) => !options.some((option) => option.label === label && option.input))) return false;
+  // FIXED: 重跑时清除 AI 本次没有选择的旧选项，并核对完整集合，不能仅以命中一个选项判成功。
+  for (const option of options) {
+    if (!option.input) return false;
+    if (option.input.checked !== wanted.has(option.label)) option.input.click();
+  }
+  return options.every((option) => option.input?.checked === wanted.has(option.label));
 }
 
 /**
@@ -229,7 +218,7 @@ async function fillBlankQuestion(subjectEl: Element, question: Question, answer:
 
   let answers: string[];
   if (Array.isArray(answer)) {
-    answers = answer.map((v) => String(v)).filter((v) => isValidAnswer(v));
+    answers = answer.map((v) => String(v));
   } else if (typeof answer === 'string') {
     if (editors.length > 1) {
       answers = answer.split(/\s*[|｜;；]\s*/).filter(Boolean);
@@ -241,9 +230,10 @@ async function fillBlankQuestion(subjectEl: Element, question: Question, answer:
     answers = [String(answer)];
   }
 
+  if (answers.length !== editors.length || answers.some((value) => !isValidAnswer(value))) return false;
   let filled = 0;
   for (let idx = 0; idx < editors.length; idx++) {
-    const value = answers[idx] ?? answers[answers.length - 1] ?? '';
+    const value = answers[idx];
     if (!value || !isValidAnswer(value)) continue;
     const editor = editors[idx];
     const writeFn = editor instanceof HTMLTextAreaElement ? fillTextarea : fillEditable;
@@ -251,7 +241,7 @@ async function fillBlankQuestion(subjectEl: Element, question: Question, answer:
     if (ok) filled++;
     log(`题目 ${question.displayIndex} 空位 ${idx + 1}: ${ok ? '已填入' : '写入失败'} "${value.substring(0, 30)}"`);
   }
-  return filled > 0;
+  return filled === editors.length;
 }
 
 /**
@@ -280,11 +270,11 @@ async function fillEssayQuestion(subjectEl: Element, question: Question, answer:
   const verified = await writeWithVerify(editor, answerText, writeFn);
   // FIXED: 必须 await fallback 同步——以前 fire-and-forget 会让主流程在 stats 统计完成后
   //        才真正写完隐藏 textarea，提交时可能拿到旧值。
-  const fallbackCount = await syncEssayFallbackEditors(subjectEl, editor, answerText);
+  const fallbackVerified = await syncEssayFallbackEditors(subjectEl, editor, answerText);
   log(
-    `题目 ${question.displayIndex}: 填入简答答案 (${answerText.length}字, verified=${verified}, fallback 同步 ${fallbackCount} 个)`,
+    `题目 ${question.displayIndex}: 填入简答答案 (${answerText.length}字, verified=${verified}, fallback=${fallbackVerified})`,
   );
-  return true;
+  return verified && fallbackVerified;
 }
 
 // fillMatchingQuestion 已提取到 answer-match.ts

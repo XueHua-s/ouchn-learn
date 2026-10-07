@@ -1,6 +1,6 @@
 {
   "name": "ouchn-learn",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "国家开放大学视频一键挂机脚本+资源下载",
   "author": "OrangeMinus + Enhanced",
   "license": "MIT",
@@ -30,6 +30,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^17.6.0",
     "husky": "^9.0.11",
+    "jsdom": "26.1.0",
     "lint-staged": "^15.2.2",
     "prettier": "^3.2.5",
     "tsup": "^8.0.2",

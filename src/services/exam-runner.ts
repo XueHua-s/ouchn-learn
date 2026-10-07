@@ -40,7 +40,7 @@ function printExamStats(stats: ExamStats, questions: Question[]): void {
   log('===== 答题统计 =====');
   console.table({
     'DOM .subject 总数': stats.totalDomSubjects,
-    提取题目数: stats.extractedCount,
+    提取作答项数: stats.extractedCount,
     'AI 返回题目数': stats.aiReturnedCount,
     成功填写数: stats.filledCount,
     工具调用数: stats.toolCallCount,
@@ -113,7 +113,12 @@ export async function runAutoExam(config: ExamConfig, callbacks: ExamRunnerCallb
       return;
     }
 
-    emitStatus(callbacks, `已提取 ${questions.length} 道题目，正在调用 AI 分析...`, 'info');
+    const topLevelCount = new Set(questions.map((question) => question.parentIndex ?? question.index)).size;
+    emitStatus(
+      callbacks,
+      `已提取 ${topLevelCount} 道大题，共 ${questions.length} 个作答项，正在调用 AI 分析...`,
+      'info',
+    );
 
     const aiResponse = await callProvider(config, questions, stats, (done, total) => {
       emitStatus(callbacks, 'AI 答题中...', 'info', { done, total });
@@ -129,17 +134,17 @@ export async function runAutoExam(config: ExamConfig, callbacks: ExamRunnerCallb
       return;
     }
 
-    emitStatus(callbacks, `AI 返回 ${aiResponse.questions.length} 道答案，正在填写...`, 'info');
+    emitStatus(callbacks, `AI 返回 ${aiResponse.questions.length} 个作答项答案，正在填写...`, 'info');
 
     await fillAnswersWithTools(questions, aiResponse, stats);
     printExamStats(stats, questions);
 
-    const parts = [`成功填写 ${stats.filledCount}/${questions.length} 道题`];
+    const parts = [`${topLevelCount} 道大题，已校验填写 ${stats.filledCount}/${questions.length} 个作答项`];
     if (stats.fillFailedQuestions.length > 0) {
-      parts.push(`失败 ${stats.fillFailedQuestions.length} 道`);
+      parts.push(`失败：${toDisplayIndexes(stats.fillFailedQuestions, questions).join('、')}`);
     }
     if (stats.skippedQuestions.length > 0) {
-      parts.push(`跳过 ${stats.skippedQuestions.length} 道`);
+      parts.push(`跳过：${toDisplayIndexes(stats.skippedQuestions, questions).join('、')}`);
     }
     if (stats.visionModeQuestions.length > 0) {
       parts.push(`图片识别 ${stats.visionModeQuestions.length} 道`);
