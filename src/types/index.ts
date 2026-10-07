@@ -15,13 +15,6 @@ export interface PageElement {
   index: number;
 }
 
-export interface HangInfo {
-  button: HTMLElement;
-  activityId: string;
-  time: string;
-  title: string;
-}
-
 export interface ViewState {
   isActive: boolean;
   processedCount: number;

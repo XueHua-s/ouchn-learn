@@ -1,50 +1,24 @@
-import { timeStringToSeconds, extractNumber } from '@/utils/helper';
-import { requestActivitiesRead } from './auto-hang';
+import { hangActivityForButton, syncHangButtons } from './hang-buttons';
 
-/**
- * 初始化原有的挂机按钮点击事件
- */
+let eventsInitialized = false;
+let scanningTimer: number | null = null;
+
+/** 页面生命周期内仅注册一次委托，React 面板重建不需要重新绑定。 */
 export function initLegacyHangEvents(): void {
-  $(document).on('click', '#auto-button', function () {
-    const $this = $(this);
-    const activityId = (this as HTMLElement).dataset.activityId;
-    const time = (this as HTMLElement).dataset.time;
-
-    if (activityId && time) {
-      requestActivitiesRead(activityId, time, $this);
-    }
+  if (eventsInitialized) return;
+  eventsInitialized = true;
+  $(document).on('click', '.auto-button', function (event) {
+    event.preventDefault();
+    event.stopPropagation();
+    void hangActivityForButton(this as HTMLElement).catch((error: unknown) => {
+      console.error('[视频挂机] 请求失败', error);
+    });
   });
 }
 
-/**
- * 定期扫描并创建挂机按钮
- */
+/** 兼容平台异步渲染目录；重复初始化不增加轮询定时器。 */
 export function startAutoButtonScanning(): void {
-  setInterval(() => {
-    const activities = document.getElementsByClassName('learning-activity ng-scope');
-
-    for (const element of Array.from(activities)) {
-      const autoButton = element.getElementsByClassName('auto-button');
-      if (autoButton && autoButton.length > 0) {
-        continue;
-      }
-
-      const id = extractNumber(element.id);
-      const activityValue = element.getElementsByClassName('attribute-value number ng-binding');
-
-      if (activityValue.length > 0) {
-        const completeness = element.getElementsByClassName('completeness full');
-        const activityTimeStr = activityValue[0].textContent;
-
-        if (activityTimeStr) {
-          const time = timeStringToSeconds(activityTimeStr);
-          const buttonText = completeness && completeness.length > 0 ? '已完成' : '点击挂机';
-          const btnHtml = `<span id="auto-button" class="button button-green small gtm-label auto-button" style="font-size: 12px; width: 58px; margin-left: 4px;" data-activity-id="${id}" data-time="${time}">${buttonText}</span>`;
-
-          $(element).prepend(btnHtml);
-          console.log('课程id:', id, '时间:', time);
-        }
-      }
-    }
-  }, 500);
+  if (scanningTimer !== null) return;
+  syncHangButtons();
+  scanningTimer = window.setInterval(syncHangButtons, 500);
 }

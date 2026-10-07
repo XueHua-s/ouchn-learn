@@ -1,4 +1,5 @@
 import { defineConfig } from 'tsup';
+import { version } from './package.json';
 
 export default defineConfig({
   entry: ['src/index.ts'],
@@ -16,7 +17,7 @@ export default defineConfig({
     js: `// ==UserScript==
 // @name         国家开放大学视频一键挂机脚本+资源下载+AI答题
 // @namespace    http://tampermonkey.net/
-// @version      2024-12-19
+// @version      ${version}
 // @description  国家开放大学视频一键挂机脚本，新增课件/视频一键下载功能，新增AI自动答题功能
 // @author       OrangeMinus + Enhanced
 // @match        https://lms.ouchn.cn/course/**

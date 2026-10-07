@@ -37,6 +37,9 @@ jobs:
       - name: Run linter
         run: pnpm run lint
 
+      - name: Run hang regression tests
+        run: pnpm exec node --test tests/auto-hang.test.cjs
+
       - name: Build project
         run: pnpm run build
 

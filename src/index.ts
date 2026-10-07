@@ -1,6 +1,7 @@
 import { injectStyles } from './modules/styles';
 import { initLegacyHangEvents, startAutoButtonScanning } from './modules/legacy-hang';
 import { mountOuchnRenderer } from './renderer/mount';
+import { version } from '../package.json';
 
 /**
  * 主入口函数
@@ -10,7 +11,7 @@ import { mountOuchnRenderer } from './renderer/mount';
 
   console.log('========================================');
   console.log('国开学习脚本已加载');
-  console.log('版本: 1.0.2');
+  console.log(`版本: ${version}`);
   console.log('当前URL:', window.location.href);
   console.log('========================================');
 
