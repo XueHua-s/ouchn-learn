@@ -1,22 +1,24 @@
-import { syncHangButtons } from './hang-buttons';
-import { requestActivitiesRead } from './auto-hang';
+import { hangActivityForButton, syncHangButtons } from './hang-buttons';
 
-/** 初始化单个视频的挂机事件。 */
+let eventsInitialized = false;
+let scanningTimer: number | null = null;
+
+/** 页面生命周期内仅注册一次委托，React 面板重建不需要重新绑定。 */
 export function initLegacyHangEvents(): void {
-  $(document).on('click', '.auto-button', function () {
-    const button = this as HTMLElement;
-    if (button.getAttribute('aria-disabled') === 'true' || button.textContent === '已完成') return;
-    const { activityId, time } = button.dataset;
-    if (activityId && time) {
-      void requestActivitiesRead(activityId, time, $(button)).catch((error: unknown) => {
-        console.error('[视频挂机] 请求失败', error);
-        button.textContent = '重试挂机';
-      });
-    }
+  if (eventsInitialized) return;
+  eventsInitialized = true;
+  $(document).on('click', '.auto-button', function (event) {
+    event.preventDefault();
+    event.stopPropagation();
+    void hangActivityForButton(this as HTMLElement).catch((error: unknown) => {
+      console.error('[视频挂机] 请求失败', error);
+    });
   });
 }
 
+/** 兼容平台异步渲染目录；重复初始化不增加轮询定时器。 */
 export function startAutoButtonScanning(): void {
+  if (scanningTimer !== null) return;
   syncHangButtons();
-  setInterval(syncHangButtons, 500);
+  scanningTimer = window.setInterval(syncHangButtons, 500);
 }
