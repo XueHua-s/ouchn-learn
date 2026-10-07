@@ -25,10 +25,11 @@ function activity(id, duration, video = true, complete = false) {
     complete,
     button: null,
     querySelector(selector) {
-      if (selector === '[ng-switch-when="online_video"]') return video ? {} : null;
+      if (selector === ':scope > .clickable-area > .activity-summary[ng-switch-when="online_video"]')
+        return video ? this : null;
       if (selector === '.video-duration .attribute-value, .activity-attribute .attribute-value.number')
         return this.duration ? { textContent: this.duration } : null;
-      if (selector === '.completeness.full') return this.complete ? {} : null;
+      if (selector === '.activity-operations-container .completeness.full') return this.complete ? {} : null;
       if (selector === '.auto-button') return this.button;
       if (selector === '.activity-header > .activity-title .title') return { textContent: `Video ${id}` };
       throw new Error(`Unexpected selector: ${selector}`);
@@ -40,7 +41,7 @@ function activity(id, duration, video = true, complete = false) {
   };
 }
 
-function harness(rows) {
+function harness(rows, durations = {}) {
   const modules = {},
     timers = new Map(),
     requests = [],
@@ -124,6 +125,15 @@ function harness(rows) {
         },
       },
       require(id) {
+        if (id === './video-duration')
+          return {
+            getVideoDuration: () => null,
+            isVideoDurationLoading: () => false,
+            isVideoDurationLocked: () => false,
+            loadVideoDuration: async () => null,
+            retryUnavailableVideoDurations() {},
+            ...durations,
+          };
         if (id.startsWith('./')) return load(id.slice(2));
         if (id === '@/constants') return { API_BASE_URL: '/api', DEFAULT_HANG_INTERVAL: 30 };
         if (id === '@/utils/dom')
@@ -333,7 +343,7 @@ test('startup stop/restart ignores old expansion; failures and abort release the
   assert.equal(h.expansions.length, count);
 });
 
-test('empty/unavailable queues stop, and newly ready videos prevent false all-completed status', async () => {
+test('empty/unavailable queues stop, and newly ready videos join the same run', async () => {
   const empty = harness([]);
   await empty.start();
   assert.equal(empty.running.at(-1), false);
@@ -342,8 +352,14 @@ test('empty/unavailable queues stop, and newly ready videos prevent false all-co
   h.rows[1].duration = '00:09:00';
   h.requests[0].resolve({ completeness: 'full' });
   await flush();
-  assert.equal(h.statuses.at(-1).type, 'warning');
-  assert.match(h.statuses.at(-1).message, /仍有 1 个视频未完成/);
+  assert.equal(h.running.at(-1), true);
+  assert.equal(h.nextTimer(), 30000);
+  await flush();
+  assert.match(h.requests[1].options.url, /\/2$/);
+  h.requests[1].resolve({ completeness: 'full' });
+  await flush();
+  assert.equal(h.running.at(-1), false);
+  assert.match(h.statuses.at(-1).message, /所有视频已挂机完成/);
   const unavailable = harness([activity(1, null), activity(2, null)]);
   await unavailable.start();
   assert.equal(unavailable.requests.length, 0);
@@ -397,4 +413,99 @@ test('legacy initialization is idempotent and delegated clicks do not propagate 
   assert.equal(h.requests.length, 1);
   h.requests[0].resolve({ completeness: 'full' });
   await flush();
+});
+
+test('batch waits for missing media metadata and posts confirmed seconds rather than skipping it', async () => {
+  const metadata = deferred();
+  let seconds = null;
+  const h = harness([activity(17833735, null)], {
+    getVideoDuration: () => seconds,
+    isVideoDurationLoading: () => seconds === null,
+    loadVideoDuration: () => metadata.promise,
+  });
+  const run = h.startAutoHangAllWithCallbacks({ intervalSeconds: 30 }, h.callbacks);
+  h.expansions[0].resolve();
+  await flush();
+  h.syncHangButtons();
+  assert.equal(h.rows[0].button.textContent, '读取时长中');
+  assert.equal(h.requests.length, 0);
+  seconds = 506;
+  metadata.resolve(seconds);
+  await run;
+  await flush();
+  assert.equal(JSON.parse(h.requests[0].options.data).end, 506);
+  h.requests[0].resolve({ completeness: 'full' });
+  await flush();
+  assert.equal(h.running.at(-1), false);
+});
+
+test('stop/restart while media is loading prevents stale runs from owning callbacks or submitting twice', async () => {
+  const metadata = deferred();
+  let seconds = null;
+  const h = harness([activity(1, null)], {
+    getVideoDuration: () => seconds,
+    loadVideoDuration: () => metadata.promise,
+  });
+  const old = h.startAutoHangAllWithCallbacks({ intervalSeconds: 30 }, h.callbacks);
+  h.expansions[0].resolve();
+  await flush();
+  h.stopAutoHanging();
+  const oldStatuses = h.statuses.length;
+  const newStatuses = [];
+  const newer = h.startAutoHangAllWithCallbacks({ intervalSeconds: 30 }, { onStatus: (s) => newStatuses.push(s) });
+  h.expansions[1].resolve();
+  await flush();
+  seconds = 120;
+  metadata.resolve(seconds);
+  await Promise.all([old, newer]);
+  await flush();
+  assert.equal(h.requests.length, 1);
+  assert.equal(h.statuses.length, oldStatuses);
+  h.requests[0].resolve({ completeness: 'full' });
+  await flush();
+  assert.match(newStatuses.at(-1).message, /所有视频已挂机完成/);
+});
+
+test('a late locked response is retried after prerequisites finish, and the unlocked video joins this run', async () => {
+  const locked = deferred();
+  let seconds = null,
+    attempts = 0,
+    allowRetry = false,
+    pending = null;
+  const h = harness([activity(1, '00:10:00'), activity(2, null)], {
+    getVideoDuration: () => seconds,
+    isVideoDurationLocked: () => seconds === null,
+    loadVideoDuration: async () => {
+      if (seconds !== null) return seconds;
+      if (pending) return pending;
+      attempts++;
+      if (attempts === 1) return null;
+      if (attempts === 2) {
+        pending = locked.promise.then(() => {
+          allowRetry = false;
+          pending = null;
+          return null;
+        });
+        return pending;
+      }
+      if (allowRetry) seconds = 90;
+      return seconds;
+    },
+    retryUnavailableVideoDurations() {
+      allowRetry = true;
+    },
+  });
+  await h.start();
+  assert.equal(h.rows[1].button.textContent, '待解锁');
+  h.requests[0].resolve({ completeness: 'full' });
+  await flush();
+  locked.resolve(null);
+  await flush();
+  assert.equal(h.nextTimer(), 30000);
+  await flush();
+  assert.equal(h.requests.length, 2);
+  assert.equal(JSON.parse(h.requests[1].options.data).end, 90);
+  h.requests[1].resolve({ completeness: 'full' });
+  await flush();
+  assert.match(h.statuses.at(-1).message, /所有视频已挂机完成/);
 });

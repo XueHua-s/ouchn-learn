@@ -1,7 +1,7 @@
 import { DEFAULT_HANG_INTERVAL } from '@/constants';
 import { ensureAllSectionsExpanded } from '@/utils/dom';
 import type { TaskCallbacks, TaskStatusType } from '@/services/task-contracts';
-import { completeHangActivity, scanHangActivities, type HangActivity } from './hang-buttons';
+import { completeHangActivity, prepareHangActivities, scanHangActivities, type HangActivity } from './hang-buttons';
 
 interface HangRun {
   callbacks: TaskCallbacks;
@@ -38,7 +38,7 @@ function finishQueue(run: HangRun): void {
   report(
     run,
     remaining
-      ? `本轮队列已完成；仍有 ${remaining} 个视频未完成，其中 ${unavailableCount} 个时长未就绪，请稍后重新扫描`
+      ? `本轮队列已完成；仍有 ${remaining} 个视频未完成，其中 ${unavailableCount} 个时长未就绪或尚未解锁，请稍后重新扫描`
       : '✅ 所有视频已挂机完成！',
     remaining ? 'warning' : 'success',
   );
@@ -59,8 +59,15 @@ async function processNext(run: HangRun): Promise<void> {
     if (activeRun !== run) return;
     run.index++;
     if (run.index >= run.queue.length) {
-      finishQueue(run);
-      return;
+      // FIXED: 完成前置视频可能解锁目录中缺时长的活动；队尾重新准备并纳入新任务，不能直接宣告结束。
+      await prepareHangActivities({ retryUnavailable: true });
+      if (activeRun !== run) return;
+      const queued = new Set(run.queue.map((item) => item.activityId));
+      run.queue.push(...scanHangActivities().tasks.filter((item) => !queued.has(item.activityId)));
+      if (run.index >= run.queue.length) {
+        finishQueue(run);
+        return;
+      }
     }
     const configured = run.input.getIntervalSeconds?.() ?? run.input.intervalSeconds;
     const interval = Number.isFinite(configured) && configured > 0 ? Math.min(configured, 300) : DEFAULT_HANG_INTERVAL;
@@ -108,13 +115,16 @@ export async function startAutoHangAllWithCallbacks(
   try {
     await ensureAllSectionsExpanded();
     if (activeRun !== run) return;
+    report(run, '正在读取缺失的视频时长...');
+    await prepareHangActivities();
+    if (activeRun !== run) return;
     report(run, '正在扫描未完成的视频...');
     const { tasks, unavailableCount } = scanHangActivities();
     run.queue = tasks;
     if (!tasks.length) {
       report(
         run,
-        unavailableCount ? `${unavailableCount} 个视频时长未就绪，暂时无法挂机` : '没有找到需要挂机的视频！',
+        unavailableCount ? `${unavailableCount} 个视频时长未就绪或尚未解锁，暂时无法挂机` : '没有找到需要挂机的视频！',
         'warning',
       );
       finish(run);
@@ -122,7 +132,7 @@ export async function startAutoHangAllWithCallbacks(
     }
     report(
       run,
-      `找到 ${tasks.length} 个视频需要挂机${unavailableCount ? `，另有 ${unavailableCount} 个时长未就绪` : ''}，开始自动挂机...`,
+      `找到 ${tasks.length} 个视频需要挂机${unavailableCount ? `，另有 ${unavailableCount} 个时长未就绪或尚未解锁` : ''}，开始自动挂机...`,
       'success',
     );
     void processNext(run);

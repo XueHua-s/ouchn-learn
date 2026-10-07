@@ -1,6 +1,13 @@
 import { API_BASE_URL } from '@/constants';
 import type { ActivityReadRequest, ActivityReadResponse } from '@/types';
 import { extractNumber, timeStringToSeconds } from '@/utils/helper';
+import {
+  getVideoDuration,
+  isVideoDurationLoading,
+  isVideoDurationLocked,
+  loadVideoDuration,
+  retryUnavailableVideoDurations,
+} from './video-duration';
 
 export interface HangActivity {
   activityId: string;
@@ -19,6 +26,8 @@ const buttonLabels = {
   complete: '已完成',
   pending: '挂机中',
   unavailable: '时长未就绪',
+  loading: '读取时长中',
+  locked: '待解锁',
   failed: '重试挂机',
   ready: '点击挂机',
 };
@@ -26,6 +35,8 @@ const buttonLabels = {
 function getButtonStatus(video: VideoActivity): keyof typeof buttonLabels {
   if (video.complete) return 'complete';
   if (reads.get(video.activityId)?.status === 'pending') return 'pending';
+  if (video.seconds === null && isVideoDurationLoading(video.activityId)) return 'loading';
+  if (video.seconds === null && isVideoDurationLocked(video.activityId)) return 'locked';
   if (video.seconds === null) return 'unavailable';
   return reads.get(video.activityId)?.status === 'failed' ? 'failed' : 'ready';
 }
@@ -35,21 +46,26 @@ function getButtonStatus(video: VideoActivity): keyof typeof buttonLabels {
 const reads = new Map<string, ReadState>();
 
 function readVideo(element: HTMLElement): VideoActivity | null {
-  // FIXED: 题数、截止日期不是视频时长，只识别音视频活动；删除会误提交测试和作业。
-  if (!element.querySelector('[ng-switch-when="online_video"]')) return null;
+  // FIXED: 前置条件弹窗也有 online_video 节点；必须限定活动自身的顶层摘要，不能匹配任意后代。
+  const summary = element.querySelector<HTMLElement>(
+    ':scope > .clickable-area > .activity-summary[ng-switch-when="online_video"]',
+  );
+  if (!summary) return null;
   const activityId = extractNumber(element.id);
   if (!/^\d+$/.test(activityId)) return null;
-  const duration = element.querySelector(
+  const duration = summary.querySelector(
     '.video-duration .attribute-value, .activity-attribute .attribute-value.number',
   );
   const value = duration?.textContent?.trim() || '';
   const seconds = /^\d+:[0-5]\d:[0-5]\d$/.test(value) ? timeStringToSeconds(value) : NaN;
   return {
     activityId,
-    title: element.querySelector('.activity-header > .activity-title .title')?.textContent?.trim() || '未知视频',
+    title: summary.querySelector('.activity-header > .activity-title .title')?.textContent?.trim() || '未知视频',
     element,
-    seconds: Number.isSafeInteger(seconds) && seconds > 0 ? seconds : null,
-    complete: Boolean(element.querySelector('.completeness.full')) || reads.get(activityId)?.status === 'complete',
+    seconds: Number.isSafeInteger(seconds) && seconds > 0 ? seconds : getVideoDuration(activityId),
+    complete:
+      Boolean(summary.querySelector('.activity-operations-container .completeness.full')) ||
+      reads.get(activityId)?.status === 'complete',
   };
 }
 
@@ -75,7 +91,12 @@ function renderButton(video: VideoActivity): void {
   const status = getButtonStatus(video);
   const disabled = status !== 'ready' && status !== 'failed';
   const text = buttonLabels[status];
-  const title = video.seconds === null && !video.complete ? '平台尚未提供视频时长，时长就绪后自动恢复挂机按钮' : '';
+  const title =
+    status === 'locked'
+      ? '请先完成平台要求的前置活动，完成后自动重新检查'
+      : video.seconds === null && !video.complete
+        ? '正在尝试读取媒体时长；读取失败会稍后自动重试'
+        : '';
   // FIXED: 每 500ms 扫描不得重写相同 DOM，否则全页 MutationObserver 永远无法达到稳定窗口。
   //        文案只负责展示；是否可执行始终由平台元数据与 reads 决定。
   setAttributeIfChanged(button, 'aria-disabled', String(disabled));
@@ -89,7 +110,24 @@ function renderButton(video: VideoActivity): void {
 
 /** 同步可见目录中的按钮。相同输入不产生 DOM mutation；重建的条目继承请求状态。 */
 export function syncHangButtons(): void {
-  findVideos().forEach(renderButton);
+  for (const video of findVideos()) {
+    if (!video.complete && video.seconds === null) {
+      void loadVideoDuration(video.activityId);
+    }
+    renderButton(video);
+  }
+}
+
+/** 批量任务开始前等待缺失时长的有限元数据读取，避免后台读取尚未完成就跳过视频。 */
+export async function prepareHangActivities(options: { retryUnavailable?: boolean } = {}): Promise<void> {
+  const missing = findVideos().filter((video) => !video.complete && video.seconds === null);
+  await Promise.all(missing.map((video) => loadVideoDuration(video.activityId)));
+  if (options.retryUnavailable) {
+    // 等在途读取结束后再清除失败冷却；前置任务完成前发出的 403 不能盖过本次解锁重试。
+    retryUnavailableVideoDurations();
+    await Promise.all(missing.map((video) => loadVideoDuration(video.activityId)));
+  }
+  syncHangButtons();
 }
 
 /** 获取当前未完成的视频及缺失时长数量。包含在途请求，批量任务可等待其结果。 */
@@ -132,6 +170,7 @@ export async function completeHangActivity(activityId: string): Promise<void> {
       });
       if (response?.completeness !== 'full') throw new Error('平台未确认学习完成');
       reads.set(activityId, { status: 'complete' });
+      retryUnavailableVideoDurations();
     } catch (error) {
       reads.set(activityId, { status: 'failed' });
       throw error;
